@@ -64,7 +64,28 @@ class LiveReelBuilder:
         # write manifest for dashboard to read
         self._write_manifest()
 
+        # update the growing reel immediately
+        self._update_growing_reel()
+
         return self.clips[-1]
+
+    def _update_growing_reel(self):
+        """Re-concat all clips into the growing reel — call after each new event."""
+        growing_path = self.out_dir / f"{self.video_name}_reel.mp4"
+        if len(self.clips) == 1:
+            subprocess.run(["cp", self.clips[0]["path"], str(growing_path)])
+        else:
+            concat_file = growing_path.with_suffix(".txt")
+            lines = [f"file '{p['path']}'" for p in self.clips]
+            concat_file.write_text("\n".join(lines))
+            subprocess.run([
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-f", "concat", "-safe", "0",
+                "-i", str(concat_file),
+                "-c", "copy",
+                str(growing_path),
+            ], check=True)
+            concat_file.unlink(missing_ok=True)
 
     def _extract_clip(self, start_sec, duration, out_path):
         subprocess.run([
@@ -122,28 +143,6 @@ class LiveReelBuilder:
         manifest_path.write_text(json.dumps(manifest, indent=2))
 
     def finalize(self, intro_text="", outro_text=""):
-        """Generate the final concatenated reel with intro/outro."""
-        if not self.clips:
-            return None
-
+        """Return the path to the final reel (already up to date)."""
         final_path = self.out_dir / f"{self.video_name}_reel.mp4"
-
-        if len(self.clips) == 1:
-            subprocess.run(["cp", self.clips[0]["path"], str(final_path)])
-        else:
-            self._concat_all_clips(final_path)
-
-        return final_path
-
-    def _concat_all_clips(self, out_path):
-        concat_file = out_path.with_suffix(".txt")
-        lines = [f"file '{p['path']}'" for p in self.clips]
-        concat_file.write_text("\n".join(lines))
-        subprocess.run([
-            "ffmpeg", "-y", "-loglevel", "error",
-            "-f", "concat", "-safe", "0",
-            "-i", str(concat_file),
-            "-c", "copy",
-            str(out_path),
-        ], check=True)
-        concat_file.unlink(missing_ok=True)
+        return final_path if final_path.exists() else None
