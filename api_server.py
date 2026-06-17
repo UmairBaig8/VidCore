@@ -217,7 +217,7 @@ async def upload_video(file: UploadFile):
 
 
 @app.post("/analyze")
-def start_analysis(video: str, depth: str = "fast", interval: float = 1.0):
+def start_analysis(video: str, depth: str = "full", interval: float = 1.0):
     video_path = Path(video)
     if not video_path.exists():
         return JSONResponse({"error": f"Video not found: {video}"}, status_code=404)

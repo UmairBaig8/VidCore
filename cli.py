@@ -139,7 +139,7 @@ def stream(
     video: str,
     interval: float = typer.Option(0.5),
     depth: str = typer.Option(
-        "fast", "--depth", "-d",
+        "full", "--depth", "-d",
         help="Analysis depth: scene-only, fast, full"
     ),
     live: bool = typer.Option(
