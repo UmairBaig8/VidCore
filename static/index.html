@@ -2149,6 +2149,9 @@ async function pollJobStatus() {
     
     if (s.status === 'complete') {
       await onProcessingComplete();
+      // flash the match-reports tab to notify user
+      const reportTab = document.querySelector('[data-tab=\"match-reports\"]');
+      if (reportTab) reportTab.style.background = 'var(--green)';
       return;
     }
     if (s.status === 'error') {
