@@ -428,9 +428,24 @@ class VideoOrchestrator:
                 if event_str and sport_events_prompt:
                     parsed = _parse_json_safe(event_str)
                     events = parsed.get("events", [])
-                    key_events = router.process_event([
-                        {**e, "timestamp": f"{timestamp:.1f}s"} for e in events
-                    ])
+                    for e in events:
+                        e["timestamp"] = f"{timestamp:.1f}s"
+                    key_events = router.process_event(events)
+                    # deduplicate: if GOAL detected within 4s of GOAL_ATTEMPT, merge
+                    if len(self.ctx.key_events) >= 2:
+                        prev = self.ctx.key_events[-1]
+                        curr = key_events[0] if key_events else None
+                        if curr and prev.get("type") == "GOAL_ATTEMPT" and curr.get("type") == "GOAL":
+                            try:
+                                pt = float(prev.get("timestamp", "0").replace("s", ""))
+                                ct = float(curr.get("timestamp", "0").replace("s", ""))
+                                if ct - pt < 4.0:
+                                    # merge: replace GOAL_ATTEMPT with GOAL
+                                    self.ctx.key_events[-1] = curr
+                                    self.ctx.key_events[-1]["timestamp"] = prev["timestamp"]
+                                    key_events = []
+                            except (ValueError, TypeError):
+                                pass
                     # update momentum from event data
                     if "possession_home" in parsed:
                         self.ctx.update_momentum(int(parsed["possession_home"]))
