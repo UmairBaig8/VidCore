@@ -12,3 +12,4 @@ runs/
 videos/*
 !videos/.gitkeep
 bus.jpg
+/output/
