@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<title>VidCore</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="styles.css">
+
+<script src="https://unpkg.com/lucide@latest"></script>
+</head>
+
+<body>
+
+<div class="app">
+
+    <!-- SIDEBAR -->
+
+    <aside class="sidebar">
+
+        <div class="logo">
+            <span class="logo-icon">◉</span>
+            <span>VidCore</span>
+            <span class="badge">DEMO</span>
+        </div>
+
+        <p class="muted">
+            Mock data — no VLLM needed
+        </p>
+
+        <div class="field">
+            <label>Match Selector</label>
+
+            <select>
+                <option>Roma vs Verona (2-1)</option>
+            </select>
+        </div>
+
+        <button class="btn primary">
+            Run Demo
+        </button>
+
+        <button class="btn danger">
+            Stop
+        </button>
+
+        <button class="btn ghost">
+            Switch to Live API
+        </button>
+
+        <div class="spacer"></div>
+
+        <div class="theme-switch">
+            🌙
+        </div>
+
+        <div class="user-card">
+            <div class="avatar">U</div>
+            <div>
+                <div>Umair Baig</div>
+                <small>Pro Plan</small>
+            </div>
+        </div>
+
+    </aside>
+
+    <!-- MAIN -->
+
+    <main class="main">
+
+        <!-- TOP BAR -->
+
+        <div class="top">
+
+            <div>
+                <h1>ROMA vs VERONA</h1>
+                <div class="subtitle">
+                    Serie A · May 18, 2024 · San Siro
+                </div>
+            </div>
+
+            <div class="stats">
+
+                <div class="stat">
+                    <span>Final Score</span>
+                    <strong>2 - 1</strong>
+                </div>
+
+                <div class="stat">
+                    <span>Events</span>
+                    <strong>14</strong>
+                </div>
+
+                <div class="stat">
+                    <span>Possession</span>
+                    <strong>58%</strong>
+                </div>
+
+                <div class="stat">
+                    <span>Shots</span>
+                    <strong>12</strong>
+                </div>
+
+                <div class="stat">
+                    <span>Fouls</span>
+                    <strong>15</strong>
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- CONTENT -->
+
+        <section class="content">
+
+            <!-- VIDEO SECTION -->
+
+            <section class="video-section">
+
+                <div class="video-card">
+
+                    <video controls poster="https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1920">
+                    </video>
+
+                    <div class="timeline">
+
+                        <div class="marker goal"></div>
+                        <div class="marker foul"></div>
+                        <div class="marker yellow"></div>
+                        <div class="marker var"></div>
+
+                    </div>
+
+                    <div class="filters">
+
+                        <span class="chip active">All Events</span>
+                        <span class="chip">Goals</span>
+                        <span class="chip">Fouls</span>
+                        <span class="chip">Cards</span>
+                        <span class="chip">VAR</span>
+
+                    </div>
+
+                </div>
+
+                <div class="bottom-grid">
+
+                    <div class="card report">
+
+                        <h3>Match Report</h3>
+
+                        <ul>
+
+                            <li>Dybala scored winner</li>
+                            <li>14 events detected</li>
+                            <li>Roma controlled possession</li>
+                            <li>VAR reviewed twice</li>
+
+                        </ul>
+
+                    </div>
+
+                    <div class="card insights">
+
+                        <h3>Key Insights</h3>
+
+                        <ul>
+
+                            <li>58% possession</li>
+                            <li>2 goals by Dybala</li>
+                            <li>Strong final-third pressure</li>
+
+                        </ul>
+
+                    </div>
+
+                    <div class="card players">
+
+                        <h3>Top Players</h3>
+
+                        <div class="player">
+
+                            <img src="https://i.pravatar.cc/40">
+
+                            <span>Dybala</span>
+
+                            <strong>8.7</strong>
+
+                        </div>
+
+                        <div class="player">
+
+                            <img src="https://i.pravatar.cc/41">
+
+                            <span>Lukaku</span>
+
+                            <strong>7.8</strong>
+
+                        </div>
+
+                    </div>
+
+                    <div class="card chart">
+
+                        <h3>Event Distribution</h3>
+
+                        <svg viewBox="0 0 42 42">
+
+                            <circle
+                                cx="21"
+                                cy="21"
+                                r="15"
+                                fill="transparent"
+                                stroke="#223"
+                                stroke-width="5"
+                            />
+
+                            <circle
+                                cx="21"
+                                cy="21"
+                                r="15"
+                                fill="transparent"
+                                stroke="#3b82f6"
+                                stroke-width="5"
+                                stroke-dasharray="70 30"
+                            />
+
+                        </svg>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+            <!-- TICKER -->
+
+            <aside class="ticker">
+
+                <h2>Live Event Ticker</h2>
+
+                <div id="events"></div>
+
+            </aside>
+
+        </section>
+
+    </main>
+
+</div>
+
+<script src="app.js"></script>
+
+<script>
+lucide.createIcons();
+</script>
+
+</body>
+</html>
