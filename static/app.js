@@ -3,7 +3,7 @@
 const API = (() => {
   const p = window.location.pathname;
   const idx = p.lastIndexOf('/dashboard');
-  return idx >= 0 ? p.substring(0, idx + 1) : '/';
+  return idx >= 0 ? p.substring(0, idx) + '/' : '/';
 })();
 let ws = null;
 let jobId = null;
