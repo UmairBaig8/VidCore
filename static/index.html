@@ -2200,7 +2200,8 @@ function handleWebSocketEvent(data) {
         markCheck('check-location', data.location);
         setStat('location-val', data.location);
       }
-      document.getElementById('classify-status').textContent = 'Detection complete — starting analysis...';
+      const statusEl = document.getElementById('classify-status');
+      if (statusEl) statusEl.textContent = 'Detection complete — starting analysis...';
       drawPitch();
       startVideoIfReady();
       break;
@@ -2434,6 +2435,10 @@ async function onProcessingComplete(data) {
     reelSrc.src = `${API}/output/reels/live/${cleanName}_reel.mp4?t=${Date.now()}`;
     reelSrc.type = 'video/mp4';
     video.appendChild(reelSrc);
+    const proReel = document.createElement('source');
+    proReel.src = `${API}/output/reels/${cleanName}_all.mp4?t=${Date.now()}`;
+    proReel.type = 'video/mp4';
+    video.appendChild(proReel);
     const fallback = document.createElement('source');
     fallback.src = `${API}/videos/${selectedVideoName}`;
     fallback.type = 'video/mp4';
@@ -2588,11 +2593,22 @@ function loadStudioReel(flavor, btnElement) {
 }
 
 function seekStudioPlayer(timeStr) {
-  const studioVid = document.getElementById('studio-player');
-  if (studioVid) {
-    studioVid.currentTime = parseFloat(timeStr);
-    studioVid.play();
-  }
+  // ensure studio tab is active so the player exists
+  if (activeView !== 'highlights-studio') switchTab('highlights-studio');
+  setTimeout(() => {
+    const studioVid = document.getElementById('studio-player');
+    if (studioVid) {
+      studioVid.currentTime = parseFloat(timeStr);
+      studioVid.play().catch(() => {});
+    } else {
+      // fallback: seek in main player
+      const mainVid = document.getElementById('live-player');
+      if (mainVid) {
+        mainVid.currentTime = parseFloat(timeStr);
+        mainVid.play().catch(() => {});
+      }
+    }
+  }, 200);
 }
 
 function downloadActiveReel() {
