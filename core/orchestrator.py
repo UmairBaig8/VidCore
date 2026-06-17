@@ -10,6 +10,7 @@ from core.config import load_config
 from core.llm_client import VLLMClient
 
 from skills.frame_sampler import sample_frames, count_frames
+from skills.live_sampler import sample_live, count_live_frames
 from skills.frame_encoder import encode_frame
 from skills.timeline import Timeline
 from skills.report_generator import save_report
@@ -48,12 +49,14 @@ def _format_events_for_summary(timeline):
 class VideoOrchestrator:
 
     def __init__(self, video_path, sample_interval=0.5,
-                 depth="full", stream_mode=False, report_only=False):
+                 depth="full", stream_mode=False, report_only=False,
+                 live=False):
         self.video_path = video_path
         self.sample_interval = sample_interval
         self.depth = depth
         self.stream_mode = stream_mode
         self.report_only = report_only
+        self.live = live
 
     def _run_parallel(self, client, tasks):
         results = {}
@@ -85,10 +88,17 @@ class VideoOrchestrator:
         do_event = self.depth in ("fast", "full")
         do_analysis = self.depth == "full"
 
-        total_frames = count_frames(self.video_path, self.sample_interval)
+        if self.live:
+            sampler = sample_live
+            counter = count_live_frames
+        else:
+            sampler = sample_frames
+            counter = count_frames
+
+        total_frames = counter(self.video_path, self.sample_interval)
         processed = 0
 
-        for timestamp, frame in sample_frames(self.video_path, self.sample_interval):
+        for timestamp, frame in sampler(self.video_path, self.sample_interval):
             processed += 1
             image_b64 = encode_frame(frame)
             if image_b64 is None:

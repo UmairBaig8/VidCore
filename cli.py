@@ -68,6 +68,10 @@ def analyze(
         "full", "--depth", "-d",
         help="Analysis depth: scene-only, fast, full"
     ),
+    live: bool = typer.Option(
+        False, "--live", "-l",
+        help="Real-time sync: sample frames at wall-clock playback speed"
+    ),
 ):
     """Analyze a video"""
     from pathlib import Path
@@ -85,6 +89,7 @@ def analyze(
         video_path=str(video_path),
         sample_interval=interval,
         depth=depth,
+        live=live,
     )
     orchestrator.run()
 
@@ -96,6 +101,10 @@ def stream(
     depth: str = typer.Option(
         "fast", "--depth", "-d",
         help="Analysis depth: scene-only, fast, full"
+    ),
+    live: bool = typer.Option(
+        False, "--live", "-l",
+        help="Real-time sync: sample frames at wall-clock playback speed"
     ),
 ):
     """Live event stream"""
@@ -115,6 +124,7 @@ def stream(
         sample_interval=interval,
         depth=depth,
         stream_mode=True,
+        live=live,
     )
     orchestrator.run()
 
@@ -132,6 +142,7 @@ def report(video: str):
     orchestrator = VideoOrchestrator(
         video_path=str(video_path),
         report_only=True,
+        live=True,
     )
     orchestrator.run()
 
