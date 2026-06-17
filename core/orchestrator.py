@@ -1,9 +1,11 @@
 import json
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+import cv2
 import requests
 
 from core.agent_loader import AgentLoader
@@ -17,6 +19,7 @@ from skills.frame_sampler import sample_frames, count_frames
 from skills.live_sampler import sample_live, count_live_frames
 from skills.frame_encoder import encode_frame
 from skills.timeline import Timeline
+from skills.video_loader import open_video
 from skills.report_generator import save_report
 from skills.csv_writer import save_csv
 
@@ -56,26 +59,24 @@ def _detect_geo(client, video_path):
     if not geo_prompt_path.exists():
         return None
     geo_prompt = geo_prompt_path.read_text()
-    for ts, frame in sample_frames(video_path, 5.0):
-        b64 = encode_frame(frame)
-        if not b64:
-            continue
-        result = _ask_with_retry(client, geo_prompt, b64)
-        if result:
-            try:
-                text = result.strip()
-                if "```" in text:
-                    for part in text.split("```"):
-                        part = part.strip()
-                        if part.startswith("json"):
-                            part = part[4:].strip()
-                        if part.startswith("{") and part.endswith("}"):
-                            text = part
-                            break
-                return json.loads(text)
-            except (json.JSONDecodeError, AttributeError):
-                return None
-        break
+    # sample from middle of video, not the intro graphics
+    cap = open_video(video_path)
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0:
+        fps = 30.0
+    mid_frame = min(total // 2, int(fps * 30))
+    cap.set(cv2.CAP_PROP_POS_FRAMES, mid_frame)
+    ret, frame = cap.read()
+    cap.release()
+    if not ret:
+        return None
+    b64 = encode_frame(frame)
+    if not b64:
+        return None
+    result = _ask_with_retry(client, geo_prompt, b64)
+    if result:
+        return _parse_json_safe(result)
     return None
 
 
@@ -91,16 +92,31 @@ def _detect_sport(client, video_path):
     if not sport_prompt_path.exists():
         return {"sport": "generic", "confidence": 0.0}
     sport_prompt = sport_prompt_path.read_text()
-    for ts, frame in sample_frames(video_path, 3.0):
+    # sample from middle of video (skip intro graphics / pre-match)
+    cap = open_video(video_path)
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    # try 30s in, 50% in, 70% in — return majority vote
+    offsets = [int(fps * 30), total // 2, int(total * 0.7)]
+    votes = {}
+    for off in offsets:
+        off = min(off, total - 1)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, off)
+        ret, frame = cap.read()
+        if not ret:
+            continue
         b64 = encode_frame(frame)
         if not b64:
             continue
         result = _ask_with_retry(client, sport_prompt, b64)
         if result:
             parsed = _parse_json_safe(result)
-            if "sport" in parsed:
-                return parsed
-        break
+            s = parsed.get("sport", "generic")
+            votes[s] = votes.get(s, 0) + 1
+    cap.release()
+    if votes:
+        best = max(votes, key=votes.get)
+        return {"sport": best, "confidence": votes[best] / len(votes)}
     return {"sport": "generic", "confidence": 0.0}
 
 
@@ -129,15 +145,25 @@ def _parse_json_safe(raw_text):
 
 def _classify_video(client, video_path, interval):
     classifier_prompt = (agents_dir() / "video_classifier.md").read_text()
+    cap = open_video(video_path)
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    # skip first 10s (intro graphics), sample 3 frames from 10% 40% 70%
+    offsets = [max(int(fps * 10), 0), total // 3, int(total * 0.7)]
     samples = []
-    for ts, frame in sample_frames(video_path, interval):
+    for off in offsets:
+        off = min(off, total - 1)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, off)
+        ret, frame = cap.read()
+        if not ret:
+            continue
         b64 = encode_frame(frame)
-        if b64:
-            result = _ask_with_retry(client, classifier_prompt, b64)
-            if result:
-                samples.append(_parse_json_safe(result))
-        if len(samples) >= CLASSIFY_FRAMES:
-            break
+        if not b64:
+            continue
+        result = _ask_with_retry(client, classifier_prompt, b64)
+        if result:
+            samples.append(_parse_json_safe(result))
+    cap.release()
 
     if not samples:
         return {"video_type": "full_match", "confidence": 0.0,
@@ -185,6 +211,49 @@ def _build_report_header(ctx, video_stem):
         header.append("")
 
     return "\n".join(header)
+
+
+def _update_context_from_scene(ctx, scene_desc):
+    if not scene_desc or not ctx:
+        return
+
+    # ── phase detection from keywords ──
+    if any(w in scene_desc.lower() for w in ("graphic", "promotional", "abstract",
+                                                "static", "triangles", "geometric",
+                                                "subscribe")):
+        if ctx.phase != "commercial":
+            ctx.update_phase("commercial")
+    elif any(w in scene_desc.lower() for w in ("goal scored", "celebrating",
+                                                  "goalkeeper diving", "shot on goal",
+                                                  "goal attempt")):
+        if ctx.phase != "attack_final_third":
+            ctx.update_phase("attack_final_third")
+    elif any(w in scene_desc.lower() for w in ("half time", "halftime")):
+        ctx.update_phase("half_time")
+    elif any(w in scene_desc.lower() for w in ("dribbling", "passing", "midfield",
+                                                  "possession", "advancing")):
+        if ctx.phase in ("kickoff", "commercial", "unknown"):
+            ctx.update_phase("open_play")
+
+    # ── score extraction: look for patterns like "ROM 2-0 VER" or "2-1" or "1-0" ──
+    score_patterns = [
+        r'(?:ROM|VER|[A-Z]{3})\s*(\d+)\s*[-–]\s*(\d+)\s*(?:ROM|VER|[A-Z]{3})?',
+        r'score\S*\s*(\d+)\s*[-–]\s*(\d+)',
+        r'(?:leads?|leading|winning)\s*(\d+)\s*[-–]\s*(\d+)',
+        r'\b(\d+)\s*[-–]\s*(\d+)\b',
+    ]
+    for pat in score_patterns:
+        m = re.search(pat, scene_desc, re.IGNORECASE)
+        if m:
+            try:
+                h, a = int(m.group(1)), int(m.group(2))
+                if (h, a) != (ctx.home_score, ctx.away_score):
+                    ctx.home_score = h
+                    ctx.away_score = a
+                    ctx.last_score_change = "detected_from_scene"
+            except (ValueError, IndexError):
+                pass
+            break
 
 
 class VideoOrchestrator:
@@ -301,6 +370,9 @@ class VideoOrchestrator:
             if scene_desc is None:
                 continue
 
+            # extract score + phase from scene description (heuristic fallback)
+            _update_context_from_scene(self.ctx, scene_desc)
+
             # step 2: router decides what else to call
             route = router.route(scene_desc, processed)
             self._vprint(f"frame={processed} phase={self.ctx.phase} "
@@ -353,14 +425,15 @@ class VideoOrchestrator:
 
             event_dict = {
                 "timestamp": f"{timestamp:.1f}s",
-                "result": scene_desc,
                 "scene": scene_desc,
+                "scene_type": _parse_json_safe(scene_desc).get("scene_type", "unknown"),
+                "phase": self.ctx.phase,
+                "score": self.ctx.score_string(),
+                "key_events": json.dumps(key_events) if key_events else "",
                 "event": event_str or "",
                 "reasoning": reasoning_str or "",
                 "commentary": commentary_str or "",
-                "key_events": json.dumps(key_events) if key_events else "",
-                "phase": self.ctx.phase,
-                "score": self.ctx.score_string(),
+                "result": scene_desc,
             }
 
             timeline.add(event_dict)

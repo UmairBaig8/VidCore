@@ -11,6 +11,7 @@ def save_csv(events, video_name, context=None):
 
     fieldnames = [
         "timestamp",
+        "scene_type",
         "scene",
         "phase",
         "score",
