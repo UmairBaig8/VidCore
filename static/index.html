@@ -1809,13 +1809,23 @@ function initPitch() {
   pitchCanvas = document.getElementById('pitch-canvas');
   if (!pitchCanvas) return;
   pitchCtx = pitchCanvas.getContext('2d');
-  // Defer draw until DOM layout complete
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      resizePitchCanvas();
-      drawPitch();
-    });
+
+  const container = pitchCanvas.parentElement;
+  if (!container) return;
+
+  // auto-redraw whenever the container resizes
+  if (window._pitchObserver) window._pitchObserver.disconnect();
+  window._pitchObserver = new ResizeObserver(() => {
+    resizePitchCanvas();
+    drawPitch();
   });
+  window._pitchObserver.observe(container);
+
+  // initial draw — small delay to let CSS aspect-ratio settle
+  setTimeout(() => {
+    resizePitchCanvas();
+    drawPitch();
+  }, 100);
 }
 
 function resizePitchCanvas() {
