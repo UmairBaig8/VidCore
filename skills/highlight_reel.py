@@ -1,6 +1,6 @@
 """
-Highlight reel generator — extracts clips around key events and stitches them.
-Uses ffmpeg if available, falls back to OpenCV.
+Highlight reel generator — extracts clips around key events, filters by type/team,
+supports landscape (16:9) and social/vertical (9:16) formats.
 """
 
 import json
@@ -9,7 +9,16 @@ import tempfile
 from pathlib import Path
 
 from core.paths import output_dir
-from skills.frame_sampler import count_frames as _count
+
+FLAVORS = {
+    "all":    {"label": "Full Highlights",       "types": None, "format": "landscape"},
+    "goals":  {"label": "Goals Only",            "types": {"GOAL"}, "format": "landscape"},
+    "cards":  {"label": "Cards & Fouls",         "types": {"YELLOW_CARD", "RED_CARD", "FOUL", "PENALTY"}, "format": "landscape"},
+    "drama":  {"label": "Drama Moments",         "types": {"GOAL", "YELLOW_CARD", "RED_CARD", "PENALTY", "VAR_CHECK", "INJURY"}, "format": "landscape"},
+    "saves":  {"label": "Saves & Blocks",        "types": {"SAVE", "GOAL_ATTEMPT", "BLOCK"}, "format": "landscape"},
+    "social": {"label": "Social (9:16)",         "types": None, "format": "vertical"},
+    "social_goals": {"label": "Goal Reel (9:16)", "types": {"GOAL"}, "format": "vertical"},
+}
 
 
 def _ffmpeg_available():
@@ -20,15 +29,22 @@ def _ffmpeg_available():
         return False
 
 
-def _extract_clip_ffmpeg(video_path, start_sec, duration, out_path):
-    subprocess.run([
+def _extract_clip_ffmpeg(video_path, start_sec, duration, out_path, crop_vertical=False):
+    vf = ""
+    if crop_vertical:
+        # crop center 9:16 from 16:9 source
+        vf = "crop=ih*9/16:ih,scale=1080:1920"
+
+    args = [
         "ffmpeg", "-y", "-loglevel", "error",
         "-ss", str(start_sec),
-        "-i", video_path,
+        "-i", str(video_path),
         "-t", str(duration),
-        "-c", "copy",
-        str(out_path),
-    ], check=True)
+    ]
+    if vf:
+        args += ["-vf", vf]
+    args += ["-c:a", "copy", str(out_path)]
+    subprocess.run(args, check=True)
 
 
 def _concat_clips_ffmpeg(clip_paths, out_path):
@@ -44,6 +60,119 @@ def _concat_clips_ffmpeg(clip_paths, out_path):
     ], check=True)
     concat_file.unlink(missing_ok=True)
 
+
+def _filter_events(key_events, event_types=None, team=None, player=None):
+    filtered = []
+    for ev in key_events:
+        et = ev.get("type", "")
+        if event_types and et not in event_types:
+            continue
+        t = ev.get("team", ev.get("batsman", ev.get("player", ""))).lower()
+        if team and team.lower() not in t:
+            continue
+        if player and player.lower() not in t:
+            continue
+        filtered.append(ev)
+    return filtered
+
+
+def _parse_timestamps(key_events):
+    timestamps = []
+    for ev in key_events:
+        ts = ev.get("timestamp", ev.get("global_time", ""))
+        ts = ts.replace("s", "")
+        try:
+            timestamps.append(float(ts))
+        except (ValueError, TypeError):
+            continue
+    return sorted(timestamps)
+
+
+def _merge_overlapping(timestamps, window=8.0):
+    merged = []
+    for t in timestamps:
+        if merged and t - merged[-1] < window:
+            merged[-1] = t
+        else:
+            merged.append(t)
+    return merged
+
+
+def generate_reel(video_path, key_events, video_name,
+                  flavor="all", clip_before=5.0, clip_after=3.0):
+    """Generate a single highlight reel for one flavor."""
+    if isinstance(key_events, str):
+        try:
+            key_events = json.loads(key_events)
+        except json.JSONDecodeError:
+            return None
+
+    flavor_cfg = FLAVORS.get(flavor, FLAVORS["all"])
+    filtered = _filter_events(key_events, flavor_cfg["types"])
+    if not filtered:
+        return None
+
+    timestamps = _merge_overlapping(_parse_timestamps(filtered))
+    if not timestamps:
+        return None
+
+    use_ffmpeg = _ffmpeg_available()
+    is_vertical = flavor_cfg["format"] == "vertical"
+
+    out_dir = output_dir() / "reels"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    reel_path = out_dir / f"{video_name}_{flavor}.mp4"
+
+    temp_dir = Path(tempfile.mkdtemp())
+    clips = []
+
+    for i, t in enumerate(timestamps):
+        start = max(0, t - clip_before)
+        duration = clip_before + clip_after
+        clip_path = temp_dir / f"clip_{i:04d}.mp4"
+
+        try:
+            if use_ffmpeg:
+                _extract_clip_ffmpeg(video_path, start, duration, clip_path,
+                                     crop_vertical=is_vertical)
+            else:
+                _extract_clip_cv2(video_path, start, duration, clip_path)
+            clips.append(clip_path)
+        except Exception:
+            continue
+
+    if not clips:
+        return None
+
+    if use_ffmpeg:
+        _concat_clips_ffmpeg(clips, reel_path)
+    else:
+        _concat_clips_cv2(clips, reel_path)
+
+    for cp in clips:
+        cp.unlink(missing_ok=True)
+    temp_dir.rmdir()
+    return reel_path
+
+
+def generate_all_reels(video_path, key_events, video_name, flavors=None):
+    """Generate multiple reels from one analysis pass."""
+    if flavors is None:
+        flavors = ["all", "goals", "drama"]
+
+    results = {}
+    for flavor in flavors:
+        print(f"  {FLAVORS[flavor]['label']}", end="", flush=True)
+        path = generate_reel(video_path, key_events, video_name, flavor=flavor)
+        if path:
+            print(f" → {path.name}")
+            results[flavor] = str(path)
+        else:
+            print(" → no events")
+    return results
+
+
+# ── cv2 fallbacks ──
 
 def _extract_clip_cv2(video_path, start_sec, duration, out_path):
     import cv2
@@ -66,102 +195,22 @@ def _extract_clip_cv2(video_path, start_sec, duration, out_path):
     writer.release()
 
 
-def generate_reel(video_path, key_events, video_name, clip_before=5.0, clip_after=3.0):
-    """
-    Generate a highlight reel from key_events timestamps.
+def _concat_clips_cv2(clip_paths, out_path):
+    import cv2
+    cap = cv2.VideoCapture(str(clip_paths[0]))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
 
-    Args:
-        video_path: path to source video
-        key_events: list of dicts with 'timestamp' field (e.g. "57.2s")
-        video_name: output filename stem
-        clip_before: seconds before each event to include
-        clip_after: seconds after each event to include
-    Returns:
-        Path to generated reel, or None if no events
-    """
-    if not key_events:
-        return None
-
-    use_ffmpeg = _ffmpeg_available()
-    out_dir = output_dir() / "reels"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    # ── extract timestamps ──
-    timestamps = []
-    for ev in key_events:
-        ts = ev.get("timestamp", ev.get("global_time", ""))
-        ts = ts.replace("s", "")
-        try:
-            timestamps.append(float(ts))
-        except (ValueError, TypeError):
-            continue
-
-    if not timestamps:
-        return None
-
-    timestamps.sort()
-
-    # ── merge overlapping events ──
-    merged = []
-    window = clip_before + clip_after
-    for t in timestamps:
-        if merged and t - merged[-1] < window:
-            merged[-1] = t
-        else:
-            merged.append(t)
-
-    # ── extract clips ──
-    temp_dir = Path(tempfile.mkdtemp())
-    clips = []
-    for i, t in enumerate(merged):
-        start = max(0, t - clip_before)
-        duration = clip_before + clip_after
-        clip_path = temp_dir / f"clip_{i:04d}.mp4"
-
-        if use_ffmpeg:
-            try:
-                _extract_clip_ffmpeg(video_path, start, duration, clip_path)
-                clips.append(clip_path)
-            except Exception:
-                continue
-        else:
-            _extract_clip_cv2(video_path, start, duration, clip_path)
-            clips.append(clip_path)
-
-    if not clips:
-        return None
-
-    # ── concat ──
-    reel_path = out_dir / f"{video_name}_reel.mp4"
-
-    if use_ffmpeg and len(clips) > 1:
-        _concat_clips_ffmpeg(clips, reel_path)
-    elif len(clips) == 1:
-        clips[0].rename(reel_path)
-    else:
-        # cv2 concat fallback
-        import cv2
-        cap = cv2.VideoCapture(str(clips[0]))
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(str(out_path), fourcc, fps, (w, h))
+    for cp in clip_paths:
+        cap = cv2.VideoCapture(str(cp))
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            writer.write(frame)
         cap.release()
-
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(str(reel_path), fourcc, fps, (w, h))
-        for cp in clips:
-            cap = cv2.VideoCapture(str(cp))
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                writer.write(frame)
-            cap.release()
-        writer.release()
-
-    # clean up
-    for cp in clips:
-        cp.unlink(missing_ok=True)
-    temp_dir.rmdir()
-
-    return reel_path
+    writer.release()

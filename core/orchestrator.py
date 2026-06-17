@@ -22,7 +22,7 @@ from skills.timeline import Timeline
 from skills.video_loader import open_video
 from skills.report_generator import save_report
 from skills.csv_writer import save_csv
-from skills.highlight_reel import generate_reel
+from skills.highlight_reel import generate_all_reels
 
 MAX_RETRIES = 3
 RETRY_BACKOFF = 2
@@ -494,23 +494,22 @@ class VideoOrchestrator:
 
         report_path = save_report(header + final_summary, video_stem)
 
-        reel_path = None
+        reel_paths = {}
         if self.generate_reel and self.ctx.key_events:
-            print("\nGenerating highlight reel", end="", flush=True)
-            reel_path = generate_reel(self.video_path, self.ctx.key_events,
-                                      video_stem)
-            if reel_path:
-                print(f" → {reel_path}")
-            else:
-                print(" → failed (no clips extracted)")
+            print("\nGenerating reels:")
+            reel_paths = generate_all_reels(
+                self.video_path, self.ctx.key_events, video_stem,
+                flavors=["all", "goals", "drama", "social_goals"],
+            )
 
         if not self.report_only:
             print(f"\nType:   {self.ctx.video_type}  |  Sport: {self.ctx.sport}")
             print(f"Score:  {self.ctx.score_string()}  |  Events: {len(self.ctx.key_events)}")
             print(f"CSV:    {csv_path}")
             print(f"Report: {report_path}")
-            if reel_path:
-                print(f"Reel:   {reel_path}")
+            if reel_paths:
+                for flavor, path in reel_paths.items():
+                    print(f"Reel:   {path} ({flavor})")
         else:
             print(report_path)
 
