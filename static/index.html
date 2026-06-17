@@ -1945,11 +1945,22 @@ function startVideoIfReady() {
   
   _videoStarted = true;
   const pw = document.getElementById('player-window');
-  if (pw) pw.innerHTML = `
-    <video class="video-element" id="live-player" controls autoplay muted playsinline>
-      <source src="${API}/videos/${selectedVideoName}" type="video/mp4">
-    </video>
-  `;
+  if (pw) {
+    // Check if video element already exists (don't replace, just update src)
+    let video = document.getElementById('live-player');
+    if (!video) {
+      pw.innerHTML = `<video class="video-element" id="live-player" controls autoplay muted playsinline></video>`;
+      video = document.getElementById('live-player');
+    }
+    // Add/update source
+    video.innerHTML = '';
+    const src = document.createElement('source');
+    src.src = `${API}/videos/${selectedVideoName}`;
+    src.type = 'video/mp4';
+    video.appendChild(src);
+    video.load();
+    video.play().catch(() => {});
+  }
 }
 
 function markCheck(id, val) {
@@ -2340,20 +2351,22 @@ async function onProcessingComplete() {
   setProgressBar(100);
   flashAgent('commentary');
 
-  // Load Main Player Video
+  // Update reel source if available
   const playerWindow = document.getElementById('player-window');
-  const cleanName = selectedVideoName.replace('.mp4','');
-  playerWindow.innerHTML = `
-    <video class="video-element" id="live-player" controls autoplay muted>
-      <source src="${API}/output/reels/live/${cleanName}_reel.mp4?t=${Date.now()}" type="video/mp4">
-      <source src="${API}/videos/${selectedVideoName}" type="video/mp4">
-    </video>
-    <div class="crop-overlay-916" id="crop-overlay">
-      <div class="crop-pillar crop-pillar-left"><span class="crop-label-tag">Cut Pillar</span></div>
-      <div></div>
-      <div class="crop-pillar crop-pillar-right"><span class="crop-label-tag">Cut Pillar</span></div>
-    </div>
-  `;
+  const video = document.getElementById('live-player');
+  if (video && playerWindow && !playerWindow.querySelector('.classify-card')) {
+    const cleanName = selectedVideoName.replace('.mp4','');
+    video.innerHTML = '';
+    const reelSrc = document.createElement('source');
+    reelSrc.src = `${API}/output/reels/live/${cleanName}_reel.mp4?t=${Date.now()}`;
+    reelSrc.type = 'video/mp4';
+    video.appendChild(reelSrc);
+    const fallback = document.createElement('source');
+    fallback.src = `${API}/videos/${selectedVideoName}`;
+    fallback.type = 'video/mp4';
+    video.appendChild(fallback);
+    video.load();
+  }
   document.getElementById('crop-overlay').style.display = isMobileCropActive ? 'grid' : 'none';
 
   // Load Context
