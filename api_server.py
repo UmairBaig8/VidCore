@@ -74,7 +74,11 @@ class WebSocketEmitter(EventEmitter):
                      "scene_type": scene_type, "activity": activity})
 
     def on_key_event(self, event):
-        self._send({"type": "key_event", **event})
+        self._send({"type": "key_event",
+                     "event_type": event.get("type", ""),
+                     "timestamp": event.get("timestamp", ""),
+                     "team": event.get("team", ""),
+                     "player": event.get("player", "")})
 
     def on_clip_generated(self, event_type, timestamp, path, total_clips):
         self._send({"type": "clip", "event_type": event_type,
