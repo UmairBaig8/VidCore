@@ -2277,7 +2277,7 @@ function handleWebSocketEvent(data) {
       break;
       
     case 'complete':
-      onProcessingComplete();
+      onProcessingComplete(data);
       break;
       
     case 'error':
@@ -2416,7 +2416,7 @@ function setFilter(f, el) {
 }
 
 // ── COMPLETED & ERROR ACTIONS ───────────────────────────────────────────
-async function onProcessingComplete() {
+async function onProcessingComplete(data) {
   document.getElementById('analyze-btn').disabled = false;
   document.getElementById('analyze-btn').textContent = '✓ Orchestration Complete';
   document.getElementById('stop-btn').style.display = 'none';
@@ -2443,13 +2443,26 @@ async function onProcessingComplete() {
   const overlay = document.getElementById('crop-overlay');
   if (overlay) overlay.style.display = isMobileCropActive ? 'grid' : 'none';
 
+  // Populate segment library from WebSocket complete data (no fetch needed)
+  if (data && data.reels) {
+    studioReelsManifest = { clips: [], reel_url: null };
+    const flavors = Object.keys(data.reels);
+    for (const f of flavors) {
+      studioReelsManifest.clips.push({
+        timestamp: '0:00',
+        event_type: f.toUpperCase(),
+        path: data.reels[f],
+      });
+    }
+    studioReelsManifest.reel_url = data.reel_urls ? data.reel_urls.live || data.reel_urls.all : null;
+  }
+
   // Load Context
   try {
     const ctx = await fetch(`${API}/context/${jobId}`).then(r => r.json());
     setStat('sport-val', 'Sport: ' + (ctx.sport || 'unknown'));
     setStat('type-val', 'Match Type: ' + (ctx.type || 'unknown'));
 
-    // Populate Report Details Column
     document.getElementById('info-content').innerHTML = `
       <div class="info-row"><span class="info-label">League</span><span class="info-value">${ctx.league || 'Unknown'}</span></div>
       <div class="info-row"><span class="info-label">Teams</span><span class="info-value">${(ctx.teams || []).join(' vs ') || 'Unknown'}</span></div>
@@ -2467,7 +2480,6 @@ async function onProcessingComplete() {
   // Load Report Markdown
   try {
     const reportText = await fetch(`${API}/report/${jobId}`).then(r => r.text());
-    // Convert basic markdown tags to styled HTML
     let formattedText = reportText
       .replace(/# (.*)/g, '<h1>$1</h1>')
       .replace(/## (.*)/g, '<h2>$1</h2>')
@@ -2475,36 +2487,58 @@ async function onProcessingComplete() {
       .replace(/- \*\*(.*?)\*\*/g, '<li><strong>$1</strong>')
       .replace(/\n\n/g, '<p>')
       .replace(/---\n/g, '<hr>');
-    
     document.getElementById('report-content').innerHTML = formattedText;
   } catch(e) {
     document.getElementById('report-content').innerHTML = '<div class="empty-state">Match summary report unavailable</div>';
   }
 
-  // Load Highlights Studio reels manifest
+  // Load Highlights Studio reels manifest + segment library
   try {
-    studioReelsManifest = await fetch(`${API}/reels/${jobId}`).then(r => r.json());
+    const manifest = await fetch(`${API}/reels/${jobId}`).then(r => r.json());
+    studioReelsManifest = manifest;
     loadStudioReel('all');
-    
-    // Populate segment lists in Studio
-    const clipsList = document.getElementById('studio-clips-list');
-    if (studioReelsManifest.clips && studioReelsManifest.clips.length) {
-      clipsList.innerHTML = studioReelsManifest.clips.map((clip, i) => `
-        <div class="vid-item" style="padding: 10px;" onclick="seekStudioPlayer('${clip.timestamp}')">
-          <div class="vid-name-container">
-            <span style="color: var(--accent-emerald)">●</span>
-            <div style="display:flex; flex-direction:column; gap:2px;">
-              <span class="vid-name" style="font-size:11px; font-weight:600;">Highlight Segment #${i+1}</span>
-              <span style="font-size:9px; color:var(--text-muted);">${clip.event_type} at ${clip.timestamp}</span>
-            </div>
-          </div>
-          <span style="font-size:10px; color:var(--accent-blue)">Seek 🔍</span>
-        </div>
-      `).join('');
-    } else {
-      clipsList.innerHTML = '<div class="empty-state">No compiled segments found</div>';
-    }
   } catch(e) {}
+
+  // Populate segment library — try manifest first, then key_events fallback
+  const clipsList = document.getElementById('studio-clips-list');
+  const manifestClips = studioReelsManifest && studioReelsManifest.clips;
+  if (manifestClips && manifestClips.length) {
+    clipsList.innerHTML = manifestClips.map((clip, i) => `
+      <div class="vid-item" style="padding: 10px;" onclick="seekStudioPlayer('${clip.timestamp}')">
+        <div class="vid-name-container">
+          <span style="color: var(--accent-emerald)">●</span>
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            <span class="vid-name" style="font-size:11px; font-weight:600;">${clip.event_type} Segment #${i+1}</span>
+            <span style="font-size:9px; color:var(--text-muted);">${clip.timestamp}</span>
+          </div>
+        </div>
+        <span style="font-size:10px; color:var(--accent-blue)">Seek 🔍</span>
+      </div>
+    `).join('');
+  } else {
+    // fallback: show key events from context
+    try {
+      const keyEv = await fetch(`${API}/key_events/${jobId}`).then(r => r.json());
+      if (keyEv && keyEv.length) {
+        clipsList.innerHTML = keyEv.map((ev, i) => `
+          <div class="vid-item" style="padding: 10px;" onclick="seekStudioPlayer('${ev.timestamp || '0s'}')">
+            <div class="vid-name-container">
+              <span style="color: var(--accent-amber)">●</span>
+              <div style="display:flex; flex-direction:column; gap:2px;">
+                <span class="vid-name" style="font-size:11px; font-weight:600;">${ev.type || 'Event'} #${i+1}</span>
+                <span style="font-size:9px; color:var(--text-muted);">${ev.timestamp || '0s'} ${ev.team || ''}</span>
+              </div>
+            </div>
+            <span style="font-size:10px; color:var(--accent-blue)">Jump</span>
+          </div>
+        `).join('');
+      } else {
+        clipsList.innerHTML = '<div class="empty-state">No segments — re-run analysis with reel enabled</div>';
+      }
+    } catch(e) {
+      clipsList.innerHTML = '<div class="empty-state">Segment data unavailable</div>';
+    }
+  }
 }
 
 function onProcessingError(msg) {
