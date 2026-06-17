@@ -1,18 +1,12 @@
-from pathlib import Path
+from core.paths import agents_dir
 
 
 class AgentLoader:
 
     def __init__(self):
-
         self.agents = {}
 
     def load(self):
-
-        agent_dir = Path("agents")
-
-        for file in agent_dir.glob("*.md"):
-
+        for file in agents_dir().glob("*.md"):
             self.agents[file.stem] = file.read_text()
-
         return self.agents

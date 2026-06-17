@@ -4,12 +4,10 @@ import requests
 class VLLMClient:
 
     def __init__(self, endpoint, model):
-
         self.endpoint = endpoint
         self.model = model
 
     def ask(self, prompt, image_b64=None):
-
         content = []
 
         if image_b64:
@@ -27,21 +25,14 @@ class VLLMClient:
 
         payload = {
             "model": self.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": content
-                }
-            ],
-            "temperature": 0.1
+            "messages": [{"role": "user", "content": content}],
+            "temperature": 0.1,
         }
 
         response = requests.post(
-            self.endpoint,
-            json=payload,
-            timeout=300
+            self.endpoint, json=payload, timeout=300,
         )
-
         response.raise_for_status()
 
-        return response.json()["choices"][0]["message"]["content"]
+        data = response.json()
+        return data["choices"][0]["message"]["content"]

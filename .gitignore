@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+output/
+runs/
+.DS_Store
+*.pt
+*.pth
+*.bin
+*.safetensors
+videos/*
+!videos/.gitkeep
+bus.jpg

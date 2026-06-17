@@ -1,37 +1,28 @@
-from pathlib import Path
 import typer
 
 from core.agent_loader import AgentLoader
 from core.orchestrator import VideoOrchestrator
+from core.paths import agents_dir, skills_dir, videos_dir, output_dir
 
-app = typer.Typer(
-    help="Video Analysis Agent Platform"
-)
+app = typer.Typer(help="Video Analysis Agent Platform")
 
 
 @app.command()
 def agents():
-    """
-    Show loaded agents
-    """
-
+    """Show loaded agents"""
     loader = AgentLoader()
     loaded = loader.load()
 
     typer.echo("")
     typer.echo("Loaded Agents")
     typer.echo("-------------")
-
     for name in loaded:
-        typer.echo(f"✓ {name}")
+        typer.echo(f"\u2713 {name}")
 
 
 @app.command()
 def skills():
-    """
-    Show loaded skills
-    """
-
+    """Show loaded skills"""
     from core.registry import SkillRegistry
 
     registry = SkillRegistry()
@@ -40,24 +31,20 @@ def skills():
     typer.echo("")
     typer.echo("Loaded Skills")
     typer.echo("-------------")
-
     for skill in registry.skills:
-        typer.echo(f"✓ {skill}")
+        typer.echo(f"\u2713 {skill}")
 
 
 @app.command()
 def videos():
-    """
-    List available videos
-    """
+    """List available videos"""
+    vdir = videos_dir()
 
-    video_dir = Path("videos")
-
-    if not video_dir.exists():
+    if not vdir.exists():
         typer.echo("videos/ folder not found")
-        raise typer.Exit()
+        raise typer.Exit(1)
 
-    files = list(video_dir.glob("*"))
+    files = [f for f in vdir.iterdir() if f.is_file()]
 
     if not files:
         typer.echo("No videos found")
@@ -66,7 +53,6 @@ def videos():
     typer.echo("")
     typer.echo("Available Videos")
     typer.echo("----------------")
-
     for idx, video in enumerate(files, start=1):
         typer.echo(f"{idx}. {video.name}")
 
@@ -75,94 +61,85 @@ def videos():
 def analyze(
     video: str,
     interval: float = typer.Option(
-        0.5,
-        "--interval",
-        "-i",
+        0.5, "--interval", "-i",
         help="Frame sampling interval in seconds"
     ),
 ):
-    """
-    Analyze a video
-    """
+    """Analyze a video"""
+    from pathlib import Path
 
     video_path = Path(video)
-
     if not video_path.exists():
         typer.echo(f"Video not found: {video}")
         raise typer.Exit(1)
 
     orchestrator = VideoOrchestrator(
         video_path=str(video_path),
-        sample_interval=interval
+        sample_interval=interval,
     )
-
     orchestrator.run()
 
 
 @app.command()
 def stream(
     video: str,
-    interval: float = typer.Option(0.5)
+    interval: float = typer.Option(0.5),
 ):
-    """
-    Live event stream
-    """
+    """Live event stream"""
+    from pathlib import Path
 
     video_path = Path(video)
+    if not video_path.exists():
+        typer.echo(f"Video not found: {video}")
+        raise typer.Exit(1)
 
     orchestrator = VideoOrchestrator(
         video_path=str(video_path),
         sample_interval=interval,
-        stream_mode=True
+        stream_mode=True,
     )
-
     orchestrator.run()
 
 
 @app.command()
-def report(
-    video: str
-):
-    """
-    Generate report only
-    """
+def report(video: str):
+    """Generate report from existing timeline"""
+    from pathlib import Path
+
+    video_path = Path(video)
+    if not video_path.exists():
+        typer.echo(f"Video not found: {video}")
+        raise typer.Exit(1)
 
     orchestrator = VideoOrchestrator(
-        video_path=video,
-        report_only=True
+        video_path=str(video_path),
+        report_only=True,
     )
-
     orchestrator.run()
 
 
 @app.command()
 def doctor():
-    """
-    Validate environment
-    """
-
+    """Validate environment"""
     typer.echo("")
     typer.echo("Environment Check")
     typer.echo("-----------------")
 
     checks = {
-        "agents": Path("agents").exists(),
-        "skills": Path("skills").exists(),
-        "videos": Path("videos").exists(),
-        "output": Path("output").exists(),
+        "agents": agents_dir().exists(),
+        "skills": skills_dir().exists(),
+        "videos": videos_dir().exists(),
+        "output": output_dir().exists(),
     }
 
     for name, status in checks.items():
-        icon = "✓" if status else "✗"
+        icon = "\u2713" if status else "\u2717"
         typer.echo(f"{icon} {name}")
 
 
 @app.command()
 def config():
-    """
-    Show runtime config
-    """
-
+    """Show runtime config"""
     from core.config import load_config
 
     cfg = load_config()
@@ -170,7 +147,6 @@ def config():
     typer.echo("")
     typer.echo("Configuration")
     typer.echo("-------------")
-
     for key, value in cfg.items():
         typer.echo(f"{key}: {value}")
 

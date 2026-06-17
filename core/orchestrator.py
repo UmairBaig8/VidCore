@@ -1,79 +1,174 @@
+import sys
+import time
 from pathlib import Path
+
+import requests
 
 from core.agent_loader import AgentLoader
 from core.config import load_config
 from core.llm_client import VLLMClient
+from core.models import Event
 
-from skills.frame_sampler import sample_frames
+from skills.frame_sampler import sample_frames, count_frames
 from skills.frame_encoder import encode_frame
 from skills.timeline import Timeline
 from skills.report_generator import save_report
 
+MAX_RETRIES = 3
+RETRY_BACKOFF = 2
+
+
+def _ask_with_retry(client, prompt, image_b64=None):
+    last_exc = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            return client.ask(prompt, image_b64)
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            last_exc = exc
+            if attempt < MAX_RETRIES:
+                wait = RETRY_BACKOFF ** attempt
+                print(f"  [retry {attempt}/{MAX_RETRIES} in {wait}s]", file=sys.stderr)
+                time.sleep(wait)
+        except (KeyError, requests.HTTPError) as exc:
+            last_exc = exc
+            break
+    return None
+
+
+def _format_events_for_summary(timeline):
+    lines = []
+    for i, ev in enumerate(timeline.events, 1):
+        t = ev.get("timestamp", "?")
+        result = ev.get("result", ev.get("description", ""))
+        lines.append(f"## Event {i} [{t:.1f}s]\n{result}\n")
+    return "\n---\n".join(lines)
+
 
 class VideoOrchestrator:
 
-    def __init__(
-        self,
-        video_path,
-        sample_interval=0.5,
-        stream_mode=False,
-        report_only=False
-    ):
-
+    def __init__(self, video_path, sample_interval=0.5,
+                 stream_mode=False, report_only=False):
         self.video_path = video_path
         self.sample_interval = sample_interval
         self.stream_mode = stream_mode
         self.report_only = report_only
 
     def run(self):
-
         cfg = load_config()
-
         agents = AgentLoader().load()
-
-        client = VLLMClient(
-            cfg["vllm_endpoint"],
-            cfg["model"]
-        )
-
+        client = VLLMClient(cfg["vllm_endpoint"], cfg["model"])
         timeline = Timeline()
 
-        scene_prompt = agents["scene_detector"]
+        scene_prompt = agents.get("scene_detector", "")
+        event_prompt = agents.get("event_detector", "")
+        commentary_prompt = agents.get("commentary_agent", "")
+        reasoning_prompt = agents.get("reasoning_agent", "")
+        summary_prompt = agents.get("summary_agent", "")
+        highlight_prompt = agents.get("highlight_agent", "")
 
-        for timestamp, frame in sample_frames(
-            self.video_path,
-            self.sample_interval
-        ):
+        total_frames = count_frames(self.video_path, self.sample_interval)
+        processed = 0
 
+        for timestamp, frame in sample_frames(self.video_path, self.sample_interval):
+            processed += 1
             image_b64 = encode_frame(frame)
+            if image_b64 is None:
+                print(f"[{timestamp:.1f}s] encode failed", file=sys.stderr)
+                continue
 
-            result = client.ask(
-                scene_prompt,
-                image_b64
+            scene_desc = _ask_with_retry(client, scene_prompt, image_b64)
+            if scene_desc is None:
+                print(f"[{timestamp:.1f}s] LLM failed", file=sys.stderr)
+                continue
+
+            event_str = None
+            if event_prompt:
+                event_str = _ask_with_retry(
+                    client,
+                    f"{event_prompt}\n\nFrame: {scene_desc}"
+                )
+
+            reasoning_str = None
+            if reasoning_prompt and event_str:
+                reasoning_str = _ask_with_retry(
+                    client,
+                    f"{reasoning_prompt}\n\nObservation: {event_str}"
+                )
+
+            commentary_str = None
+            if commentary_prompt and event_str:
+                commentary_str = _ask_with_retry(
+                    client,
+                    f"{commentary_prompt}\n\nEvent: {event_str}"
+                )
+
+            event = Event(
+                timestamp=f"{timestamp:.1f}s",
+                event_type="scene",
+                description=scene_desc,
+                confidence=1.0,
             )
 
-            print(
-                f"[{timestamp:.1f}s] "
-                f"{result[:120]}"
-            )
+            event_dict = {
+                "timestamp": f"{timestamp:.1f}s",
+                "result": scene_desc,
+                "scene": scene_desc,
+            }
+            if event_str:
+                event_dict["event"] = event_str
+            if reasoning_str:
+                event_dict["reasoning"] = reasoning_str
+            if commentary_str:
+                event_dict["commentary"] = commentary_str
 
-            timeline.add({
-                "time": timestamp,
-                "result": result
-            })
+            timeline.add(event_dict)
 
-        summary_prompt = agents["summary_agent"]
+            if self.stream_mode:
+                print(f"[{timestamp:.1f}s] {scene_desc[:120]}")
+                if commentary_str:
+                    print(f"  > {commentary_str[:120]}")
+            elif not self.report_only:
+                bar_len = 30
+                done = int(bar_len * processed / max(total_frames, 1))
+                bar = f"[{'#' * done}{'-' * (bar_len - done)}]"
+                pct = processed / max(total_frames, 1) * 100
+                print(f"\r  {bar} {pct:.0f}% ({processed}/{total_frames})",
+                      end="", flush=True)
 
-        final_summary = client.ask(
+        if not self.stream_mode and not self.report_only:
+            print()
+
+        highlights = ""
+        if highlight_prompt and timeline.events:
+            highlights = _ask_with_retry(
+                client,
+                f"{highlight_prompt}\n\nTimeline:\n{_format_events_for_summary(timeline)}"
+            ) or ""
+
+        summary_payload = (
             f"{summary_prompt}\n\n"
-            f"{timeline.events}"
+            f"Timeline:\n{_format_events_for_summary(timeline)}"
         )
+        if highlights:
+            summary_payload += f"\n\nHighlights:\n{highlights}"
 
-        report = save_report(
-            final_summary,
-            Path(self.video_path).stem
-        )
+        final_summary = _ask_with_retry(client, summary_payload)
+        if final_summary is None:
+            print("Summary generation failed", file=sys.stderr)
+            final_summary = "Summary unavailable"
 
-        print()
-        print("Analysis Complete")
-        print(report)
+        if highlights:
+            final_summary = (
+                f"## Highlights\n\n{highlights}\n\n"
+                f"---\n\n"
+                f"## Full Analysis\n\n{final_summary}"
+            )
+
+        report_path = save_report(final_summary, Path(self.video_path).stem)
+
+        if not self.report_only:
+            print(f"\nReport: {report_path}")
+        else:
+            print(report_path)
+
+        return report_path
