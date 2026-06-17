@@ -2026,7 +2026,14 @@ async function startAnalysis() {
         <div class="check-row" id="check-location"><span class="check-dot"></span>Location</div>
       </div>
     </div>
-  `;\n\n  // fallback: play video after 8s even if SSE events delayed\n  if (_videoTimeout) clearTimeout(_videoTimeout);\n  _videoTimeout = setTimeout(() => {\n    if (!_videoStarted && document.getElementById('classify-card')) _startVideoNow();\n  }, 8000);\n\n  const depth = document.getElementById('depth-select').value;
+  `;
+
+  if (_videoTimeout) clearTimeout(_videoTimeout);
+  _videoTimeout = setTimeout(() => {
+    if (!_videoStarted && document.getElementById('classify-card')) _startVideoNow();
+  }, 8000);
+
+  const depth = document.getElementById('depth-select').value;
   const r = await fetch(`${API}/analyze?video=${encodeURIComponent(selectedVideo)}&depth=${depth}&interval=1.0`, { method: 'POST' });
   const job = await r.json();
   jobId = job.job_id;
