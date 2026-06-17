@@ -223,7 +223,7 @@ def _update_context_from_scene(ctx, scene_desc, skip_score=False):
         ctx.update_phase("half_time")
     elif any(w in scene_desc.lower() for w in ("dribbling", "passing", "midfield",
                                                   "possession", "advancing")):
-        if ctx.phase in ("kickoff", "commercial", "unknown"):
+        if ctx.phase in ("kickoff", "commercial", "unknown", "attack_final_third"):
             ctx.update_phase("open_play")
 
     if skip_score:
