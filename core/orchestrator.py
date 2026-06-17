@@ -508,7 +508,7 @@ class VideoOrchestrator:
                         self.ctx.update_phase(parsed["phase"])
 
             t_analysis = 0.0
-            if do_analysis and key_events and route["reasoning"]:
+            if do_analysis and key_events:
                 parallel_tasks = {}
                 if reasoning_prompt:
                     parallel_tasks["reasoning"] = (
