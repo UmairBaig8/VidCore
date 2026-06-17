@@ -11,7 +11,10 @@ Usage:
 import json
 import sys
 import time
+import threading
+
 import requests
+import websocket  # pip install websocket-client
 
 BASE = "http://localhost:9000"
 
@@ -44,7 +47,27 @@ def manual_e2e(video_path="videos/10.mp4"):
     found = any(j["id"] == job_id for j in jobs)
     print(f"4. Job in list: {found}")
 
-    # 5. wait for analysis to start
+    # 4b. WebSocket — connect and collect events
+    ws_events = []
+    ws_done = threading.Event()
+
+    def on_message(ws, message):
+        data = json.loads(message)
+        ws_events.append(data["type"])
+        if data["type"] in ("complete", "error"):
+            ws_done.set()
+
+    def on_error(ws, error):
+        print(f"    WS error: {error}")
+
+    ws_url = f"ws://localhost:9000/ws/{job_id}"
+    ws = websocket.WebSocketApp(ws_url, on_message=on_message, on_error=on_error)
+    t = threading.Thread(target=ws.run_forever, daemon=True)
+    t.start()
+
+    print(f"4b. WebSocket connected: {ws_url}")
+
+    # 5. wait for analysis
     print("5. Waiting for analysis...")
     time.sleep(5)
 
@@ -92,6 +115,12 @@ def manual_e2e(video_path="videos/10.mp4"):
     # 12. cleanup
     r = requests.delete(f"{BASE}/jobs/{job_id}")
     print(f"12. Cleanup: {r.status_code}")
+
+    # WebSocket summary
+    print(f"\n📡 WebSocket events received: {len(ws_events)}")
+    from collections import Counter
+    for etype, count in Counter(ws_events).most_common():
+        print(f"    {etype}: {count}")
 
     print(f"\n✓ API E2E complete")
     return True
