@@ -72,6 +72,10 @@ def analyze(
         False, "--live", "-l",
         help="Real-time sync: sample frames at wall-clock playback speed"
     ),
+    no_classify: bool = typer.Option(
+        False, "--no-classify",
+        help="Skip video type classification (default: classify first 3 frames)"
+    ),
 ):
     """Analyze a video"""
     from pathlib import Path
@@ -90,6 +94,7 @@ def analyze(
         sample_interval=interval,
         depth=depth,
         live=live,
+        classify=not no_classify,
     )
     orchestrator.run()
 
@@ -105,6 +110,10 @@ def stream(
     live: bool = typer.Option(
         False, "--live", "-l",
         help="Real-time sync: sample frames at wall-clock playback speed"
+    ),
+    no_classify: bool = typer.Option(
+        False, "--no-classify",
+        help="Skip video type classification"
     ),
 ):
     """Live event stream"""
@@ -125,6 +134,7 @@ def stream(
         depth=depth,
         stream_mode=True,
         live=live,
+        classify=not no_classify,
     )
     orchestrator.run()
 

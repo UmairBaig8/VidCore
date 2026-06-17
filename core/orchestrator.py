@@ -1,3 +1,4 @@
+import json
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -8,6 +9,7 @@ import requests
 from core.agent_loader import AgentLoader
 from core.config import load_config
 from core.llm_client import VLLMClient
+from core.paths import agents_dir
 
 from skills.frame_sampler import sample_frames, count_frames
 from skills.live_sampler import sample_live, count_live_frames
@@ -18,6 +20,7 @@ from skills.csv_writer import save_csv
 
 MAX_RETRIES = 3
 RETRY_BACKOFF = 2
+CLASSIFY_FRAMES = 3
 
 
 def _ask_with_retry(client, prompt, image_b64=None):
@@ -46,17 +49,70 @@ def _format_events_for_summary(timeline):
     return "\n---\n".join(lines)
 
 
+def _load_type_prompts():
+    path = agents_dir() / "type_prompts.json"
+    if path.exists():
+        return json.loads(path.read_text())
+    return {}
+
+
+def _parse_classification(raw_text):
+    try:
+        text = raw_text.strip()
+        if "```" in text:
+            for part in text.split("```"):
+                part = part.strip()
+                if part.startswith("json"):
+                    part = part[4:]
+                if part.startswith("{") and part.endswith("}"):
+                    text = part
+                    break
+        return json.loads(text)
+    except (json.JSONDecodeError, AttributeError):
+        return {"video_type": "full_match", "confidence": 0.5,
+                "evidence": "classification parse failed"}
+
+
+def _classify_video(client, video_path, interval):
+    classifier_prompt = (agents_dir() / "video_classifier.md").read_text()
+    samples = []
+    for ts, frame in sample_frames(video_path, interval):
+        b64 = encode_frame(frame)
+        if b64:
+            result = _ask_with_retry(client, classifier_prompt, b64)
+            if result:
+                samples.append(_parse_classification(result))
+        if len(samples) >= CLASSIFY_FRAMES:
+            break
+
+    if not samples:
+        return {"video_type": "full_match", "confidence": 0.0,
+                "evidence": "no frames classified"}
+
+    tally = {}
+    for s in samples:
+        t = s.get("video_type", "full_match")
+        tally[t] = tally.get(t, 0) + 1
+    best_type = max(tally, key=tally.get)
+    return {"video_type": best_type,
+            "confidence": tally[best_type] / len(samples),
+            "evidence": samples[0].get("evidence", ""),
+            "tally": tally}
+
+
 class VideoOrchestrator:
 
     def __init__(self, video_path, sample_interval=0.5,
                  depth="full", stream_mode=False, report_only=False,
-                 live=False):
+                 live=False, classify=True):
         self.video_path = video_path
         self.sample_interval = sample_interval
         self.depth = depth
         self.stream_mode = stream_mode
         self.report_only = report_only
         self.live = live
+        self.classify = classify
+        self.video_type = None
 
     def _run_parallel(self, client, tasks):
         results = {}
@@ -78,12 +134,28 @@ class VideoOrchestrator:
         client = VLLMClient(cfg["vllm_endpoint"], cfg["model"])
         timeline = Timeline()
 
+        # ── classify ──
+        if self.classify:
+            print("Classifying video type", end="", flush=True)
+            self.video_type = _classify_video(client, self.video_path,
+                                              max(self.sample_interval * 4, 2.0))
+            vt = self.video_type["video_type"]
+            print(f" → {vt} (confidence: {self.video_type['confidence']:.0%})")
+        else:
+            self.video_type = {"video_type": "full_match", "confidence": 1.0,
+                               "evidence": "classification skipped"}
+
+        vt = self.video_type["video_type"]
+
+        # ── type-specific prompts ──
+        type_prompts = _load_type_prompts().get(vt, {})
+
         scene_prompt = agents.get("scene_detector", "")
         event_prompt = agents.get("event_detector", "")
         commentary_prompt = agents.get("commentary_agent", "")
         reasoning_prompt = agents.get("reasoning_agent", "")
-        summary_prompt = agents.get("summary_agent", "")
-        highlight_prompt = agents.get("highlight_agent", "")
+        summary_prompt = type_prompts.get("summary_prompt") or agents.get("summary_agent", "")
+        highlight_prompt = type_prompts.get("highlight_prompt") or agents.get("highlight_agent", "")
 
         do_event = self.depth in ("fast", "full")
         do_analysis = self.depth == "full"
@@ -157,7 +229,7 @@ class VideoOrchestrator:
                 done = int(bar_len * processed / max(total_frames, 1))
                 bar = f"[{'#' * done}{'-' * (bar_len - done)}]"
                 pct = processed / max(total_frames, 1) * 100
-                label = f"depth={self.depth}"
+                label = f"depth={self.depth} type={vt}"
                 print(f"\r  {bar} {pct:.0f}% ({processed}/{total_frames}) {label}",
                       end="", flush=True)
 
@@ -186,17 +258,19 @@ class VideoOrchestrator:
             print("Summary generation failed", file=sys.stderr)
             final_summary = "Summary unavailable"
 
+        header = (
+            f"# {video_stem}\n\n"
+            f"**Video Type:** {vt} (confidence: {self.video_type['confidence']:.0%})\n"
+            f"**Evidence:** {self.video_type.get('evidence', '')}\n\n"
+        )
         if highlights:
-            final_summary = (
-                f"## Highlights\n\n{highlights}\n\n"
-                f"---\n\n"
-                f"## Full Analysis\n\n{final_summary}"
-            )
+            header += f"## Highlights\n\n{highlights}\n\n---\n\n"
 
-        report_path = save_report(final_summary, video_stem)
+        report_path = save_report(header + final_summary, video_stem)
 
         if not self.report_only:
-            print(f"\nCSV:    {csv_path}")
+            print(f"\nType:   {vt}")
+            print(f"CSV:    {csv_path}")
             print(f"Report: {report_path}")
         else:
             print(report_path)

@@ -232,6 +232,32 @@ def test_csv_writer():
     path.parent.rmdir()
 
 
+# ─── Classification ─────────────────────────────────────────────────────────
+
+def test_classification():
+    print("\nClassification")
+    from core.orchestrator import _parse_classification, _load_type_prompts
+
+    test("full_match parsed", lambda:
+         _parse_classification('{"video_type":"full_match","confidence":0.9}')["video_type"] == "full_match")
+
+    test("highlights parsed", lambda:
+         _parse_classification('{"video_type":"highlights","confidence":0.8}')["video_type"] == "highlights")
+
+    test("code-fenced JSON stripped", lambda:
+         _parse_classification('```json\n{"video_type":"training"}\n```')["video_type"] == "training")
+
+    test("junk text falls back to full_match", lambda:
+         _parse_classification("not json at all")["video_type"] == "full_match")
+
+    prompts = _load_type_prompts()
+    test("type_prompts.json loads", lambda: isinstance(prompts, dict) and len(prompts) >= 4)
+    test("has full_match prompts", lambda: "full_match" in prompts)
+    test("has highlights prompts", lambda: "highlights" in prompts)
+    test("has press_conference prompts", lambda: "press_conference" in prompts)
+    test("has training prompts", lambda: "training" in prompts)
+
+
 # ─── Video loader ───────────────────────────────────────────────────────────
 
 def test_video_loader():
@@ -339,6 +365,7 @@ if __name__ == "__main__":
     test_report()
     test_models()
     test_csv_writer()
+    test_classification()
     test_video_loader()
     test_orchestrator()
     test_format_events()

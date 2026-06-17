@@ -1,0 +1,26 @@
+{
+  "highlights": {
+    "summary_prompt": "Role: Generate a concise 1-paragraph highlight reel summary. Focus only on key moments: goals, saves, fouls, substitutions. Skip tactical analysis. Keep it punchy and broadcast-ready.",
+    "highlight_prompt": "Role: Pick the top 3 most exciting moments from this timeline. For each: timestamp, what happened, why it matters. Format as a highlight reel script with timecodes."
+  },
+  "full_match": {
+    "summary_prompt": "Role: Generate a comprehensive 3-paragraph tactical match report. Include: 1) Scoreline and key moments chronologically, 2) Tactical analysis of formations and possession patterns, 3) Player performance assessment and MOTM verdict.",
+    "highlight_prompt": "Role: Identify the 5 most significant tactical turning points. For each: timestamp, tactical significance, impact on match outcome. Prioritize goals, tactical shifts, injuries, and cards."
+  },
+  "press_conference": {
+    "summary_prompt": "Role: Generate a press conference transcript summary. Extract: key quotes from each speaker, topics discussed (transfers, injuries, tactics), tone of responses (defensive, confident, evasive). Format as journalist-ready bullet points.",
+    "highlight_prompt": "Role: Extract the 3 most newsworthy quotes or moments. For each: speaker, exact quote or paraphrase, why it matters in context of upcoming match/season."
+  },
+  "training": {
+    "summary_prompt": "Role: Generate a training session analysis. Focus on: drills observed, player intensity levels, specific skills being practiced (set pieces, passing patterns, pressing), notable absentees. Coach-style assessment.",
+    "highlight_prompt": "Role: Identify standout training moments: exceptional goals in drills, injury concerns, coach interventions, formation experiments."
+  },
+  "broadcast_broll": {
+    "summary_prompt": "Role: Describe the B-roll footage. Catalog: stadium views, crowd density, player warmup observations, pitch conditions, weather. No tactical analysis needed.",
+    "highlight_prompt": "Role: Note any notable visuals: tifos, celebrity sightings, pitch damage, weather anomalies."
+  },
+  "graphic_overlay": {
+    "summary_prompt": "Role: Extract all text and data from the graphic overlays observed. List: scorelines, stats tables, lineups, sponsor messages, broadcaster info. Structured data dump.",
+    "highlight_prompt": "Role: Note any stat changes or graphic transitions that convey new information."
+  }
+}
