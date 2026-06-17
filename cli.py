@@ -86,7 +86,15 @@ def analyze(
     ),
     reel: bool = typer.Option(
         False, "--reel",
-        help="Generate highlight reel from detected key events"
+        help="Generate highlight reels from detected key events"
+    ),
+    clip_before: float = typer.Option(
+        8.0, "--clip-before",
+        help="Seconds before each key event to include in reel"
+    ),
+    clip_after: float = typer.Option(
+        5.0, "--clip-after",
+        help="Seconds after each key event to include in reel"
     ),
 ):
     """Analyze a video"""
@@ -110,6 +118,8 @@ def analyze(
         location=location,
         verbose=verbose,
         generate_reel_flag=reel,
+        clip_before=clip_before,
+        clip_after=clip_after,
     )
     orchestrator.run()
 
@@ -142,6 +152,14 @@ def stream(
         False, "--reel",
         help="Generate highlight reels from detected key events"
     ),
+    clip_before: float = typer.Option(
+        8.0, "--clip-before",
+        help="Seconds before each key event to include in reel"
+    ),
+    clip_after: float = typer.Option(
+        5.0, "--clip-after",
+        help="Seconds after each key event to include in reel"
+    ),
 ):
     """Live event stream"""
     from pathlib import Path
@@ -165,6 +183,8 @@ def stream(
         location=location,
         verbose=verbose,
         generate_reel_flag=reel,
+        clip_before=clip_before,
+        clip_after=clip_after,
     )
     orchestrator.run()
 

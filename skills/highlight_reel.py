@@ -114,8 +114,10 @@ def _merge_overlapping(timestamps, window=8.0):
 
 
 def generate_reel(video_path, key_events, video_name,
-                  flavor="all", clip_before=5.0, clip_after=3.0):
-    """Generate a single highlight reel for one flavor."""
+                  flavor="all", clip_before=8.0, clip_after=5.0):
+    """Generate a single highlight reel for one flavor.
+    
+    Goals get +2s extra before (to capture build-up play)."""
     if isinstance(key_events, str):
         try:
             key_events = json.loads(key_events)
@@ -123,11 +125,18 @@ def generate_reel(video_path, key_events, video_name,
             return None
 
     flavor_cfg = FLAVORS.get(flavor, FLAVORS["all"])
+
+    # goals/attack events get extra lead-in for build-up
+    attack_types = {"GOAL", "GOAL_ATTEMPT", "PENALTY", "DUNK"}
+    goal_boost = 2.0 if flavor_cfg.get("types") and \
+                 (flavor_cfg["types"] & attack_types) else 0
+
     filtered = _filter_events(key_events, flavor_cfg["types"])
     if not filtered:
         return None
 
-    timestamps = _merge_overlapping(_parse_timestamps(filtered))
+    timestamps = _merge_overlapping(_parse_timestamps(filtered),
+                                    window=clip_before + clip_after + goal_boost + 2)
     if not timestamps:
         return None
 
@@ -142,8 +151,8 @@ def generate_reel(video_path, key_events, video_name,
     clips = []
 
     for i, t in enumerate(timestamps):
-        start = max(0, t - clip_before)
-        duration = clip_before + clip_after
+        start = max(0, t - clip_before - goal_boost)
+        duration = clip_before + clip_after + goal_boost
         clip_path = temp_dir / f"clip_{i:04d}.mp4"
 
         try:
@@ -170,7 +179,8 @@ def generate_reel(video_path, key_events, video_name,
     return reel_path
 
 
-def generate_all_reels(video_path, key_events, video_name, flavors=None):
+def generate_all_reels(video_path, key_events, video_name, flavors=None,
+                       clip_before=8.0, clip_after=5.0):
     """Generate multiple reels from one analysis pass."""
     if flavors is None:
         flavors = ["all", "goals", "drama"]
@@ -178,7 +188,8 @@ def generate_all_reels(video_path, key_events, video_name, flavors=None):
     results = {}
     for flavor in flavors:
         print(f"  {FLAVORS[flavor]['label']}", end="", flush=True)
-        path = generate_reel(video_path, key_events, video_name, flavor=flavor)
+        path = generate_reel(video_path, key_events, video_name, flavor=flavor,
+                              clip_before=clip_before, clip_after=clip_after)
         if path:
             print(f" → {path.name}")
             results[flavor] = str(path)

@@ -271,7 +271,8 @@ class VideoOrchestrator:
     def __init__(self, video_path, sample_interval=0.5,
                  depth="full", stream_mode=False, report_only=False,
                  live=False, classify=True, location=None,
-                 verbose=False, generate_reel_flag=False):
+                 verbose=False, generate_reel_flag=False,
+                 clip_before=8.0, clip_after=5.0):
         self.video_path = video_path
         self.sample_interval = sample_interval
         self.depth = depth
@@ -282,6 +283,8 @@ class VideoOrchestrator:
         self.location = location
         self.verbose = verbose
         self.generate_reel = generate_reel_flag
+        self.clip_before = clip_before
+        self.clip_after = clip_after
         self.ctx = None
 
     def _run_parallel(self, client, tasks):
@@ -515,6 +518,8 @@ class VideoOrchestrator:
             reel_paths = generate_all_reels(
                 self.video_path, self.ctx.key_events, video_stem,
                 flavors=["all", "goals", "drama", "social_goals"],
+                clip_before=self.clip_before,
+                clip_after=self.clip_after,
             )
 
         if not self.report_only:
