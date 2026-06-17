@@ -1896,6 +1896,28 @@ function drawDynamicPhaseHighlights(w, h) {
   }
 }
 
+let _videoStarted = false;
+function startVideoIfReady() {
+  if (_videoStarted) return;
+  const card = document.getElementById('classify-card');
+  if (!card) return;
+  const sport = document.getElementById('sport-val').textContent;
+  if (sport === '--' || sport === 'unknown' || sport === 'Sport: --') return;
+  
+  _videoStarted = true;
+  const pw = document.getElementById('player-window');
+  if (pw) pw.innerHTML = `
+    <video class="video-element" id="live-player" controls autoplay muted playsinline>
+      <source src="${API}/videos/${selectedVideoName}" type="video/mp4">
+    </video>
+  `;
+}
+
+function markCheck(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = '✅ ' + val;
+}
+
 // ── PLAY DETECT OVERLAYS & 9:16 CROP ──
 function toggleMobileCrop() {
   isMobileCropActive = !isMobileCropActive;
@@ -1921,12 +1943,19 @@ async function startAnalysis() {
   
   resetDashboardUI();
 
-  // Load source video IMMEDIATELY — don't wait for API response
+  // Show classification loading card (video hidden until detection complete)
   const pw = document.getElementById('player-window');
   if (pw) pw.innerHTML = `
-    <video class="video-element" id="live-player" controls autoplay muted playsinline>
-      <source src="${API}/videos/${selectedVideoName}" type="video/mp4">
-    </video>
+    <div class="classification-card" id="classify-card">
+      <div class="spinner"></div>
+      <div style="font-size:16px;font-weight:700;margin-top:12px">Analyzing Video</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px" id="classify-status">Classifying content...</div>
+      <div style="display:flex;gap:12px;margin-top:12px;font-size:11px" id="classify-checks">
+        <span id="check-sport">⬜ Sport</span>
+        <span id="check-location">⬜ Location</span>
+        <span id="check-type">⬜ Type</span>
+      </div>
+    </div>
   `;
 
   const depth = document.getElementById('depth-select').value;
@@ -2062,6 +2091,7 @@ function handleWebSocketEvent(data) {
       break;
       
     case 'scene':
+      startVideoIfReady();
       flashAgent('scene');
       if (data.activity) {
         // Feed rolling momentum chart dynamically based on keywords
@@ -2106,7 +2136,7 @@ function handleWebSocketEvent(data) {
       // SSE bundles phase/score/sport into one event
       if (data.phase) { currentPhase = data.phase; setStat('phase-val', currentPhase); }
       if (data.score) setStat('score-val', data.score);
-      if (data.sport) setStat('sport-val', data.sport);
+      if (data.sport) { setStat('sport-val', data.sport); markCheck('check-sport', data.sport); }
       drawPitch();
       break;
       
