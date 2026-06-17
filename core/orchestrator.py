@@ -23,6 +23,7 @@ from skills.video_loader import open_video
 from skills.report_generator import save_report
 from skills.csv_writer import save_csv
 from skills.highlight_reel import generate_all_reels
+from skills.live_reel import LiveReelBuilder
 
 MAX_RETRIES = 3
 RETRY_BACKOFF = 2
@@ -374,6 +375,14 @@ class VideoOrchestrator:
 
         total_frames = counter(self.video_path, self.sample_interval)
         processed = 0
+        video_stem = Path(self.video_path).stem
+
+        # ── live reel builder (generates clips as events happen) ──
+        live_reel = None
+        if self.generate_reel:
+            live_reel = LiveReelBuilder(self.video_path, video_stem,
+                                        clip_before=self.clip_before,
+                                        clip_after=self.clip_after)
 
         # ── frame loop ──
         for timestamp, frame in sampler(self.video_path, self.sample_interval):
@@ -439,6 +448,11 @@ class VideoOrchestrator:
                     r = self._run_parallel(client, parallel_tasks)
                     reasoning_str = r.get("reasoning")
                     commentary_str = r.get("commentary")
+
+            # ── immediate clip generation for live reel ──
+            if live_reel and key_events:
+                for ev in key_events:
+                    live_reel.add_event(ev)
 
             event_dict = {
                 "timestamp": f"{timestamp:.1f}s",
@@ -516,22 +530,30 @@ class VideoOrchestrator:
         report_path = save_report(header + final_summary, video_stem)
 
         reel_paths = {}
-        if self.generate_reel and self.ctx.key_events:
-            flavors = ["all", "goals", "drama", "social_goals"]
-            if self.player_filter:
-                flavors = []
-            if self.team_filter:
-                flavors = []
+        if self.generate_reel:
+            if live_reel:
+                live_path = live_reel.finalize()
+                if live_path:
+                    reel_paths["live"] = str(live_path)
+                    print(f"\nLive reel: {live_path} ({len(live_reel.clips)} clips generated during analysis)")
 
-            print("\nGenerating reels:")
-            reel_paths = generate_all_reels(
-                self.video_path, self.ctx.key_events, video_stem,
-                flavors=flavors or None,
-                clip_before=self.clip_before,
-                clip_after=self.clip_after,
-                player=self.player_filter,
-                team=self.team_filter,
-            )
+            if self.ctx.key_events:
+                flavors = ["all", "goals", "drama", "social_goals"]
+                if self.player_filter:
+                    flavors = []
+                if self.team_filter:
+                    flavors = []
+
+                print("Generating pro reels:")
+                more_paths = generate_all_reels(
+                    self.video_path, self.ctx.key_events, video_stem,
+                    flavors=flavors or None,
+                    clip_before=self.clip_before,
+                    clip_after=self.clip_after,
+                    player=self.player_filter,
+                    team=self.team_filter,
+                )
+                reel_paths.update(more_paths)
 
         if not self.report_only:
             print(f"\nType:   {self.ctx.video_type}  |  Sport: {self.ctx.sport}")
