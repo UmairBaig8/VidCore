@@ -434,13 +434,19 @@ async function startAnalysis() {
     document.getElementById('stop-btn').style.display = 'none';
   };
   
+  ws.onopen = () => {
+    if (window._sse) { window._sse.close(); window._sse = null; }
+  };
+
   ws.onerror = () => {
     startBtn.textContent = '⚠️ Connection Failed';
   };
 
-  // SSE fallback — works through AMD proxy (WS frequently blocked)
-  const sse = new EventSource(`${API}/sse/${jobId}`);
-  sse.onmessage = e => { try { handleWebSocketEvent(JSON.parse(e.data)); } catch(_){} };
+  window._sse = new EventSource(`${API}/sse/${jobId}`);
+  window._sse.onmessage = e => {
+    if (ws && ws.readyState === WebSocket.OPEN) return;
+    try { handleWebSocketEvent(JSON.parse(e.data)); } catch(_){}
+  };
 
   pollJobStatus();
 }

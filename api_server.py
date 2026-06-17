@@ -78,7 +78,8 @@ class WebSocketEmitter(EventEmitter):
                      "event_type": event.get("type", ""),
                      "timestamp": event.get("timestamp", ""),
                      "team": event.get("team", ""),
-                     "player": event.get("player", "")})
+                     "player": event.get("player", ""),
+                     "description": event.get("global_time", "")})
 
     def on_clip_generated(self, event_type, timestamp, path, total_clips):
         self._send({"type": "clip", "event_type": event_type,
@@ -300,7 +301,7 @@ async def sse_stream(job_id: str):
                 current = len(ctx.key_events)
                 if current > last_events:
                     for ev in ctx.key_events[last_events:]:
-                        yield f"data: {json.dumps({'type':'key_event','event_type':ev.get('type',''),'timestamp':ev.get('timestamp',''),'team':ev.get('team',''),'player':ev.get('player','')})}\n\n"
+                        yield f"data: {json.dumps({'type':'key_event','event_type':ev.get('type',''),'timestamp':ev.get('timestamp',''),'team':ev.get('team',''),'player':ev.get('player',''),'description':ev.get('global_time','')})}\n\n"
                     last_events = current
 
                 yield f"data: {json.dumps({'type':'status','score':ctx.score_string(),'sport':ctx.sport,'phase':ctx.phase,'events':last_events})}\n\n"
