@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import sys
 import time
@@ -25,6 +26,8 @@ from skills.report_generator import save_report
 from skills.csv_writer import save_csv
 from skills.highlight_reel import generate_all_reels
 from skills.live_reel import LiveReelBuilder
+
+logger = logging.getLogger("orchestrator")
 
 MAX_RETRIES = 3
 RETRY_BACKOFF = 2
@@ -335,6 +338,7 @@ class VideoOrchestrator:
         def _run_sport():
             return _detect_sport(client, self.video_path)
 
+        t_detect = time.time()
         with TPE(max_workers=3) as pool:
             f_cls = pool.submit(_run_classify)
             f_geo = pool.submit(_run_geo)
@@ -345,6 +349,11 @@ class VideoOrchestrator:
 
         vt = video_type["video_type"]
         sport_id = sport_info.get("sport", "generic")
+        logger.info("detection phase complete in %.1fs", time.time() - t_detect)
+        logger.info("  classify=%s (%.0f%%), geo=%s, sport=%s (%.0f%%)",
+                     vt, video_type["confidence"] * 100,
+                     geo.get("stadium", geo.get("city", "") or "unknown"),
+                     sport_id, sport_info.get("confidence", 0) * 100)
         print(f" → {vt} ({video_type['confidence']:.0%}) | "
               f"{geo.get('stadium', geo.get('city', '') or 'unknown')} | "
               f"{sport_id} ({sport_info.get('confidence', 0):.0%})")
@@ -553,7 +562,7 @@ class VideoOrchestrator:
                 parts.append(f"event={t_event:.1f}s")
             if t_analysis:
                 parts.append(f"analysis={t_analysis:.1f}s")
-            print(f"\n  → frame {processed} [{', '.join(parts)}] complete\n", flush=True)
+            logger.debug("frame %d [%s] complete", processed, ", ".join(parts))
 
         if not self.stream_mode and not self.report_only:
             print()
