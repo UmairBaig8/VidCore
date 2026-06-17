@@ -1140,16 +1140,16 @@
     
     <!-- Tab Controls -->
     <nav class="nav-tabs">
-      <button class="tab-btn active" onclick="switchTab('live-console')">
+      <button class="tab-btn active" data-tab="live-console" onclick="switchTab('live-console')">
         📊 Live Console
       </button>
-      <button class="tab-btn" onclick="switchTab('highlights-studio')">
+      <button class="tab-btn" data-tab="highlights-studio" onclick="switchTab('highlights-studio')">
         🎬 Highlights Studio
       </button>
-      <button class="tab-btn" onclick="switchTab('match-reports')">
+      <button class="tab-btn" data-tab="match-reports" onclick="switchTab('match-reports')">
         📋 Match Reports
       </button>
-      <button class="tab-btn" onclick="switchTab('media-library')">
+      <button class="tab-btn" data-tab="media-library" onclick="switchTab('media-library')">
         📁 Media Library
       </button>
     </nav>
@@ -1509,6 +1509,6 @@
     </main>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=2"></script>
 </body>
 </html>

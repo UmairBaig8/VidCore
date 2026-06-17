@@ -65,7 +65,7 @@ function switchTab(tabId) {
   
   // Update button classes
   document.querySelectorAll('.nav-tabs .tab-btn').forEach(btn => {
-    if (btn.getAttribute('onclick').includes(tabId)) {
+    if (btn.getAttribute('data-tab') === tabId) {
       btn.classList.add('active');
     } else {
       btn.classList.remove('active');
