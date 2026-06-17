@@ -167,14 +167,26 @@ def start_analysis(video: str, depth: str = "fast", interval: float = 0.5):
         return JSONResponse({"error": f"Video not found: {video}"}, status_code=404)
 
     job_id = str(uuid.uuid4())[:8]
+    emitter = EventEmitter()  # no-op until WS connects
     jobs[job_id] = {
         "id": job_id,
         "video": str(video_path),
-        "status": "starting",
-        "emitter": None,
+        "status": "running",
+        "emitter": emitter,
         "context": None,
         "key_events": [],
+        "orchestrator": None,
     }
+
+    # start analysis immediately in background thread
+    thread = threading.Thread(
+        target=_run_analysis,
+        args=(job_id, video_path),
+        kwargs={"depth": depth, "sample_interval": interval},
+        daemon=True,
+    )
+    thread.start()
+
     return {"job_id": job_id, "video": str(video_path),
             "ws_url": f"/ws/{job_id}"}
 
@@ -277,38 +289,34 @@ def get_csv_json(job_id: str):
 async def websocket_endpoint(ws: WebSocket, job_id: str):
     await ws.accept()
 
-    for _ in range(50):
-        if job_id in jobs:
-            break
-        await asyncio.sleep(0.1)
-
     job = jobs.get(job_id)
     if not job:
         await ws.send_json({"type": "error", "message": "Job not found"})
         await ws.close()
         return
 
-    video_path = job["video"]
+    # swap no-op emitter with live WebSocket emitter
+    old_emitter = job.get("emitter")
     emitter = WebSocketEmitter(ws, asyncio.get_event_loop())
     job["emitter"] = emitter
-    job["status"] = "running"
 
-    await ws.send_json({"type": "started", "job_id": job_id,
-                         "video": video_path})
+    orch = job.get("orchestrator")
+    if orch:
+        orch.emitter = emitter
 
-    thread = threading.Thread(
-        target=_run_analysis,
-        args=(job_id, video_path),
-        kwargs={"depth": "fast", "sample_interval": 0.5},
-        daemon=True,
-    )
-    thread.start()
+    await ws.send_json({"type": "connected", "job_id": job_id,
+                         "video": job["video"],
+                         "status": job.get("status"),
+                         "sport": job.get("sport"),
+                         "score": job.get("score")})
 
     try:
         while True:
             await ws.receive_text()
     except WebSocketDisconnect:
-        pass
+        job["emitter"] = old_emitter or EventEmitter()
+        if orch:
+            orch.emitter = job["emitter"]
 
 
 if __name__ == "__main__":
