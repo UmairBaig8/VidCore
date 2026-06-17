@@ -393,6 +393,7 @@ class VideoOrchestrator:
 
         # ── frame loop ──
         for timestamp, frame in sampler(self.video_path, self.sample_interval):
+            t_start = time.time()
             processed += 1
             image_b64 = encode_frame(frame)
             if image_b64 is None:
@@ -537,6 +538,9 @@ class VideoOrchestrator:
 
             self.emitter.on_progress(processed, total_frames,
                                      int(processed / max(total_frames, 1) * 100))
+
+            elapsed = time.time() - t_start
+            print(f"\n  → frame {processed} complete in {elapsed:.2f}s\n", flush=True)
 
         if not self.stream_mode and not self.report_only:
             print()
