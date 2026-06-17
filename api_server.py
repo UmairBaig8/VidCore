@@ -45,6 +45,11 @@ static_dir = output_dir()
 static_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/output", StaticFiles(directory=str(static_dir)), name="output")
 
+# mount videos dir so browser can play source videos
+vdir = videos_dir()
+if vdir.exists():
+    app.mount("/videos", StaticFiles(directory=str(vdir)), name="videos_serve")
+
 # job tracking
 jobs = {}
 job_lock = threading.Lock()

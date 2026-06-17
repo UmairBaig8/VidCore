@@ -2249,7 +2249,7 @@ async function onProcessingComplete() {
   playerWindow.innerHTML = `
     <video class="video-element" id="live-player" controls autoplay muted>
       <source src="${API}/output/reels/live/${cleanName}_reel.mp4?t=${Date.now()}" type="video/mp4">
-      <source src="${selectedVideo}" type="video/mp4">
+      <source src="${API}/videos/${selectedVideoName}" type="video/mp4">
     </video>
     <div class="crop-overlay-916" id="crop-overlay">
       <div class="crop-pillar crop-pillar-left"><span class="crop-label-tag">Cut Pillar</span></div>
