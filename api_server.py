@@ -267,6 +267,44 @@ def job_status(job_id: str):
             "context": ctx, "key_events_count": events_count}
 
 
+@app.get("/sse/{job_id}")
+async def sse_stream(job_id: str):
+    """Server-Sent Events fallback — works through proxies that block WebSocket."""
+    from fastapi.responses import StreamingResponse
+    import asyncio as aio
+
+    async def event_stream():
+        job = jobs.get(job_id)
+        if not job:
+            yield f"data: {json.dumps({'type':'error','message':'Job not found'})}\n\n"
+            return
+
+        last_events = 0
+        while True:
+            job = jobs.get(job_id)
+            if not job:
+                break
+
+            orch = job.get("orchestrator")
+            if orch and orch.ctx:
+                ctx = orch.ctx
+                current = len(ctx.key_events)
+                if current > last_events:
+                    for ev in ctx.key_events[last_events:]:
+                        yield f"data: {json.dumps({'type':'key_event','event_type':ev.get('type',''),'timestamp':ev.get('timestamp',''),'team':ev.get('team',''),'player':ev.get('player','')})}\n\n"
+                    last_events = current
+
+                yield f"data: {json.dumps({'type':'status','score':ctx.score_string(),'sport':ctx.sport,'phase':ctx.phase,'events':last_events})}\n\n"
+
+            if job.get("status") in ("complete", "error"):
+                yield f"data: {json.dumps({'type':'complete','status':job['status']})}\n\n"
+                break
+
+            await aio.sleep(1)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @app.delete("/jobs/{job_id}")
 def delete_job(job_id: str):
     job = jobs.pop(job_id, None)

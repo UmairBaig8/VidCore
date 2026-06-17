@@ -430,6 +430,10 @@ async function startAnalysis() {
     startBtn.textContent = '⚠️ Connection Failed';
   };
 
+  // SSE fallback — works through AMD proxy (WS frequently blocked)
+  const sse = new EventSource(`${API}sse/${jobId}`);
+  sse.onmessage = e => { try { handleWebSocketEvent(JSON.parse(e.data)); } catch(_){} };
+
   pollJobStatus();
 }
 
