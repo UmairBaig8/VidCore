@@ -138,6 +138,10 @@ def stream(
         False, "--verbose", "-v",
         help="Show agent routing decisions per frame"
     ),
+    reel: bool = typer.Option(
+        False, "--reel",
+        help="Generate highlight reels from detected key events"
+    ),
 ):
     """Live event stream"""
     from pathlib import Path
@@ -160,6 +164,7 @@ def stream(
         classify=not no_classify,
         location=location,
         verbose=verbose,
+        generate_reel_flag=reel,
     )
     orchestrator.run()
 
