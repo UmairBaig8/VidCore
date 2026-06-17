@@ -34,11 +34,15 @@ RETRY_BACKOFF = 2
 CLASSIFY_FRAMES = 3
 
 
-def _ask_with_retry(client, prompt, image_b64=None):
+def _ask_with_retry(client, prompt, image_b64=None, label="llm"):
     last_exc = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            return client.ask(prompt, image_b64)
+            t0 = time.time()
+            result = client.ask(prompt, image_b64)
+            elapsed = time.time() - t0
+            logger.debug("  %s call took %.1fs", label, elapsed)
+            return result
         except (requests.ConnectionError, requests.Timeout) as exc:
             last_exc = exc
             if attempt < MAX_RETRIES:
@@ -80,7 +84,7 @@ def _detect_geo(client, video_path):
     b64 = encode_frame(frame)
     if not b64:
         return None
-    result = _ask_with_retry(client, geo_prompt, b64)
+    result = _ask_with_retry(client, geo_prompt, b64, label="geo")
     if result:
         return _parse_json_safe(result)
     return None
@@ -114,7 +118,7 @@ def _detect_sport(client, video_path):
         b64 = encode_frame(frame)
         if not b64:
             continue
-        result = _ask_with_retry(client, sport_prompt, b64)
+        result = _ask_with_retry(client, sport_prompt, b64, label="sport")
         if result:
             parsed = _parse_json_safe(result)
             s = parsed.get("sport", "generic")
@@ -166,7 +170,7 @@ def _classify_video(client, video_path, interval):
         b64 = encode_frame(frame)
         if not b64:
             continue
-        result = _ask_with_retry(client, classifier_prompt, b64)
+        result = _ask_with_retry(client, classifier_prompt, b64, label="classify")
         if result:
             samples.append(_parse_json_safe(result))
     cap.release()
@@ -410,7 +414,7 @@ class VideoOrchestrator:
 
             # step 1: scene detection (always)
             t_scene = time.time()
-            scene_desc = _ask_with_retry(client, scene_prompt, image_b64)
+            scene_desc = _ask_with_retry(client, scene_prompt, image_b64, label="scene")
             t_scene = time.time() - t_scene
             if scene_desc is None:
                 continue
@@ -442,7 +446,8 @@ class VideoOrchestrator:
             if do_event and route["event_detector"] and event_prompt:
                 t0 = time.time()
                 event_str = _ask_with_retry(
-                    client, f"{event_prompt}\n\nFrame: {scene_desc}"
+                    client, f"{event_prompt}\n\nFrame: {scene_desc}",
+                    label="event"
                 )
                 t_event = time.time() - t0
                 if event_str and sport_events_prompt:
@@ -576,7 +581,8 @@ class VideoOrchestrator:
             highlights = _ask_with_retry(
                 client,
                 f"{highlight_prompt}\n\n"
-                f"Key Events:\n{json.dumps(self.ctx.key_events, indent=2)}"
+                f"Key Events:\n{json.dumps(self.ctx.key_events, indent=2)}",
+                label="highlights"
             ) or ""
 
         summary_payload = (
@@ -587,7 +593,7 @@ class VideoOrchestrator:
         if highlights:
             summary_payload += f"\n\nHighlights:\n{highlights}"
 
-        final_summary = _ask_with_retry(client, summary_payload)
+        final_summary = _ask_with_retry(client, summary_payload, label="summary")
         if final_summary is None:
             print("Summary generation failed", file=sys.stderr)
             final_summary = "Summary unavailable"
