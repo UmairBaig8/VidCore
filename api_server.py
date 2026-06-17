@@ -1,24 +1,26 @@
 """
-VidCore API Server — FastAPI + WebSocket for real-time video analysis.
+VidCore API Server — FastAPI + WebSocket for real-time video analysis dashboard.
 """
 
 import asyncio
+import csv
+import io
 import json
+import shutil
 import threading
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from core.emitter import EventEmitter
 from core.orchestrator import VideoOrchestrator
-from core.paths import output_dir
+from core.paths import output_dir, videos_dir, project_root
 
 app = FastAPI(title="VidCore API", version="1.0")
 
-# mount output dir for serving reels + CSV + reports
 static_dir = output_dir()
 static_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/output", StaticFiles(directory=str(static_dir)), name="output")
@@ -29,8 +31,6 @@ job_lock = threading.Lock()
 
 
 class WebSocketEmitter(EventEmitter):
-    """Forwards orchestrator events to a WebSocket."""
-
     def __init__(self, ws: WebSocket, loop):
         self.ws = ws
         self.loop = loop
@@ -69,14 +69,15 @@ class WebSocketEmitter(EventEmitter):
     def on_complete(self, report_path, csv_path, reel_paths, key_events_count):
         self._send({"type": "complete", "report": report_path,
                      "csv": csv_path, "reels": reel_paths,
-                     "key_events_count": key_events_count})
+                     "key_events_count": key_events_count,
+                     "reel_urls": {k: f"/output/reels/live/{Path(v).name}"
+                                   for k, v in (reel_paths or {}).items()}})
 
     def on_error(self, message):
         self._send({"type": "error", "message": message})
 
 
 def _run_analysis(job_id, video_path, **kwargs):
-    """Run orchestrator in background thread, emitting to WebSocket."""
     try:
         emitter = jobs[job_id].get("emitter")
         orchestrator = VideoOrchestrator(
@@ -86,9 +87,15 @@ def _run_analysis(job_id, video_path, **kwargs):
             live=True,
             **kwargs,
         )
+        jobs[job_id]["orchestrator"] = orchestrator
         result = orchestrator.run()
         jobs[job_id]["status"] = "complete"
         jobs[job_id]["result"] = str(result) if result else None
+        if orchestrator.ctx:
+            jobs[job_id]["context"] = orchestrator.ctx.summary()
+            jobs[job_id]["key_events"] = orchestrator.ctx.key_events
+            jobs[job_id]["sport"] = orchestrator.ctx.sport
+            jobs[job_id]["score"] = orchestrator.ctx.score_string()
     except Exception as e:
         jobs[job_id]["status"] = "error"
         jobs[job_id]["error"] = str(e)
@@ -100,11 +107,57 @@ def _run_analysis(job_id, video_path, **kwargs):
 
 @app.get("/")
 def root():
-    return {"app": "VidCore API", "endpoints": [
+    return {"app": "VidCore API", "docs": "/docs", "endpoints": [
         "POST /analyze", "WS /ws/{job_id}",
-        "GET /jobs", "GET /status/{job_id}",
-        "GET /reels/{job_id}", "GET /output/{path}",
+        "GET /jobs", "GET /status/{job_id}", "DELETE /jobs/{job_id}",
+        "GET /report/{job_id}", "GET /csv/{job_id}",
+        "GET /key_events/{job_id}", "GET /context/{job_id}",
+        "GET /reels/{job_id}", "GET /videos", "POST /upload",
+        "GET /health", "GET /output/{path}",
     ]}
+
+
+@app.get("/health")
+def health_check():
+    vllm_ok = False
+    try:
+        from core.config import load_config
+        cfg = load_config()
+        import requests
+        r = requests.get(cfg["vllm_endpoint"].replace("/v1/chat/completions", "/health"),
+                         timeout=5)
+        vllm_ok = r.status_code == 200
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        "vllm": "connected" if vllm_ok else "unreachable",
+        "ffmpeg": shutil.which("ffmpeg") is not None,
+    }
+
+
+@app.get("/videos")
+def list_videos():
+    vdir = videos_dir()
+    if not vdir.exists():
+        return []
+    return sorted([
+        {"name": f.name, "path": str(f), "size_mb": round(f.stat().st_size / 1e6, 1)}
+        for f in vdir.iterdir() if f.is_file() and f.suffix in (".mp4", ".avi", ".mov")
+    ], key=lambda x: x["name"])
+
+
+@app.post("/upload")
+async def upload_video(file: UploadFile):
+    vdir = videos_dir()
+    vdir.mkdir(parents=True, exist_ok=True)
+    path = vdir / file.filename
+    with open(path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+    return {"name": file.filename, "path": str(path),
+            "size_mb": round(len(content) / 1e6, 1)}
 
 
 @app.post("/analyze")
@@ -119,9 +172,19 @@ def start_analysis(video: str, depth: str = "fast", interval: float = 0.5):
         "video": str(video_path),
         "status": "starting",
         "emitter": None,
+        "context": None,
+        "key_events": [],
     }
+    return {"job_id": job_id, "video": str(video_path),
+            "ws_url": f"/ws/{job_id}"}
 
-    return {"job_id": job_id, "video": str(video_path)}
+
+@app.get("/jobs")
+def list_jobs():
+    return [{"id": j["id"], "video": j["video"], "status": j["status"],
+             "sport": j.get("sport", ""), "score": j.get("score", ""),
+             "events": len(j.get("key_events", []))}
+            for j in jobs.values()]
 
 
 @app.get("/status/{job_id}")
@@ -130,13 +193,33 @@ def job_status(job_id: str):
     if not job:
         return JSONResponse({"error": "Job not found"}, status_code=404)
     return {"id": job_id, "status": job["status"],
-            "result": job.get("result"), "error": job.get("error")}
+            "result": job.get("result"), "error": job.get("error"),
+            "context": job.get("context"), "sport": job.get("sport"),
+            "score": job.get("score")}
 
 
-@app.get("/jobs")
-def list_jobs():
-    return [{"id": j["id"], "video": j["video"], "status": j["status"]}
-            for j in jobs.values()]
+@app.delete("/jobs/{job_id}")
+def delete_job(job_id: str):
+    job = jobs.pop(job_id, None)
+    if not job:
+        return JSONResponse({"error": "Job not found"}, status_code=404)
+    return {"deleted": job_id}
+
+
+@app.get("/context/{job_id}")
+def get_context(job_id: str):
+    job = jobs.get(job_id)
+    if not job:
+        return JSONResponse({"error": "Job not found"}, status_code=404)
+    return job.get("context") or {"sport": "unknown", "score": "0-0"}
+
+
+@app.get("/key_events/{job_id}")
+def get_key_events(job_id: str):
+    job = jobs.get(job_id)
+    if not job:
+        return JSONResponse({"error": "Job not found"}, status_code=404)
+    return job.get("key_events", [])
 
 
 @app.get("/reels/{job_id}")
@@ -148,13 +231,44 @@ def list_reels(job_id: str):
     live_dir = output_dir() / "reels" / "live"
     manifest = live_dir / f"{video_stem}_manifest.json"
     if manifest.exists():
-        return json.loads(manifest.read_text())
+        data = json.loads(manifest.read_text())
+        # add relative URLs
+        for c in data.get("clips", []):
+            c["url"] = f"/output/reels/live/{Path(c['path']).name}"
+        data["reel_url"] = f"/output/reels/live/{video_stem}_reel.mp4"
+        return data
     return {"clips": [], "count": 0}
 
 
-@app.get("/manifest/{job_id}")
-def get_manifest(job_id: str):
-    return list_reels(job_id)
+@app.get("/report/{job_id}")
+def get_report(job_id: str):
+    job = jobs.get(job_id)
+    if not job:
+        return JSONResponse({"error": "Job not found"}, status_code=404)
+    if job.get("result"):
+        report_path = Path(job["result"])
+        if report_path.exists():
+            return PlainTextResponse(report_path.read_text(), media_type="text/markdown")
+    return JSONResponse({"error": "Report not available yet"}, status_code=404)
+
+
+@app.get("/csv/{job_id}")
+def get_csv_json(job_id: str):
+    job = jobs.get(job_id)
+    if not job:
+        return JSONResponse({"error": "Job not found"}, status_code=404)
+
+    video_stem = Path(job["video"]).stem
+    csv_path = output_dir() / "csv" / f"{video_stem}.csv"
+    if not csv_path.exists():
+        return JSONResponse({"error": "CSV not available yet"}, status_code=404)
+
+    rows = []
+    with open(csv_path) as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            rows.append(row)
+    return rows
 
 
 # ─── WebSocket ──────────────────────────────────────────────────────────────
@@ -163,8 +277,7 @@ def get_manifest(job_id: str):
 async def websocket_endpoint(ws: WebSocket, job_id: str):
     await ws.accept()
 
-    # wait for job to be ready (POST /analyze creates it)
-    for _ in range(50):  # 5s timeout
+    for _ in range(50):
         if job_id in jobs:
             break
         await asyncio.sleep(0.1)
