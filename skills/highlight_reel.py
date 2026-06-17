@@ -113,11 +113,47 @@ def _merge_overlapping(timestamps, window=8.0):
     return merged
 
 
+def _add_title_card(reel_path, title, subtitle="", duration=3.0):
+    """Overlay title text on first N seconds of reel via ffmpeg drawtext."""
+    import tempfile
+    if not _ffmpeg_available():
+        return reel_path
+
+    tmp = Path(tempfile.mktemp(suffix=".mp4"))
+    title_esc = title.replace("'", "'\\\\''").replace(":", "\\:")
+    sub_esc = subtitle.replace("'", "'\\\\''").replace(":", "\\:")
+
+    vf = (
+        f"drawtext=fontsize=42:fontcolor=white:"
+        f"text='{title_esc}':x=(w-text_w)/2:y=(h-text_h)/2-25:"
+        f"enable='between(t,0,{duration})',"
+        f"drawtext=fontsize=24:fontcolor=#aaaaaa:"
+        f"text='{sub_esc}':x=(w-text_w)/2:y=(h-text_h)/2+25:"
+        f"enable='between(t,0,{duration})'"
+    )
+
+    try:
+        subprocess.run([
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", str(reel_path),
+            "-vf", vf,
+            "-c:a", "copy",
+            str(tmp),
+        ], check=True)
+        tmp.replace(reel_path)
+    except Exception:
+        pass
+    return reel_path
+
+
 def generate_reel(video_path, key_events, video_name,
-                  flavor="all", clip_before=8.0, clip_after=5.0):
-    """Generate a single highlight reel for one flavor.
+                  flavor="all", clip_before=8.0, clip_after=5.0,
+                  event_types=None, player=None, team=None,
+                  title=None, subtitle=None):
+    """Generate a single highlight reel.
     
-    Goals get +2s extra before (to capture build-up play)."""
+    Goals get +2s extra before (to capture build-up play).
+    event_types overrides flavor defaults. player/team filter events."""
     if isinstance(key_events, str):
         try:
             key_events = json.loads(key_events)
@@ -125,13 +161,12 @@ def generate_reel(video_path, key_events, video_name,
             return None
 
     flavor_cfg = FLAVORS.get(flavor, FLAVORS["all"])
+    types = event_types or flavor_cfg.get("types")
 
-    # goals/attack events get extra lead-in for build-up
     attack_types = {"GOAL", "GOAL_ATTEMPT", "PENALTY", "DUNK"}
-    goal_boost = 2.0 if flavor_cfg.get("types") and \
-                 (flavor_cfg["types"] & attack_types) else 0
+    goal_boost = 2.0 if types and (types & attack_types) else 0
 
-    filtered = _filter_events(key_events, flavor_cfg["types"])
+    filtered = _filter_events(key_events, types, team=team, player=player)
     if not filtered:
         return None
 
@@ -176,20 +211,42 @@ def generate_reel(video_path, key_events, video_name,
     for cp in clips:
         cp.unlink(missing_ok=True)
     temp_dir.rmdir()
+
+    if title:
+        _add_title_card(reel_path, title, subtitle or "")
     return reel_path
 
 
 def generate_all_reels(video_path, key_events, video_name, flavors=None,
-                       clip_before=8.0, clip_after=5.0):
-    """Generate multiple reels from one analysis pass."""
-    if flavors is None:
-        flavors = ["all", "goals", "drama"]
+                       clip_before=8.0, clip_after=5.0,
+                       player=None, team=None):
+    """Generate multiple reels from one analysis pass.
+    If player or team is set, generates a single filtered reel."""
+    if player or team:
+        results = {}
+        label = player or team or "custom"
+        print(f"  {label.capitalize()} reel", end="", flush=True)
+        path = generate_reel(video_path, key_events, f"{video_name}_{label}",
+                             flavor="all", clip_before=clip_before,
+                             clip_after=clip_after,
+                             event_types=None, player=player, team=team,
+                             title=f"{label.upper()} Highlights",
+                             subtitle=f"{video_name} | VidCore AI")
+        if path:
+            print(f" → {path.name}")
+            results[label] = str(path)
+        else:
+            print(" → no matching events")
+        return results
 
     results = {}
     for flavor in flavors:
         print(f"  {FLAVORS[flavor]['label']}", end="", flush=True)
+        cfg = FLAVORS[flavor]
         path = generate_reel(video_path, key_events, video_name, flavor=flavor,
-                              clip_before=clip_before, clip_after=clip_after)
+                               clip_before=clip_before, clip_after=clip_after,
+                               title=cfg['label'],
+                               subtitle=f"{video_name} | VidCore AI")
         if path:
             print(f" → {path.name}")
             results[flavor] = str(path)

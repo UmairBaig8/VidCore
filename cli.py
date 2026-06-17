@@ -96,6 +96,14 @@ def analyze(
         5.0, "--clip-after",
         help="Seconds after each key event to include in reel"
     ),
+    player: str = typer.Option(
+        None, "--player",
+        help="Filter reel to specific player (e.g. 'Ronaldo', '#9')"
+    ),
+    team: str = typer.Option(
+        None, "--team",
+        help="Filter reel to specific team (e.g. 'home', 'away', 'ROM')"
+    ),
 ):
     """Analyze a video"""
     from pathlib import Path
@@ -120,6 +128,8 @@ def analyze(
         generate_reel_flag=reel,
         clip_before=clip_before,
         clip_after=clip_after,
+        player_filter=player,
+        team_filter=team,
     )
     orchestrator.run()
 

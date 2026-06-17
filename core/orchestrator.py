@@ -272,7 +272,8 @@ class VideoOrchestrator:
                  depth="full", stream_mode=False, report_only=False,
                  live=False, classify=True, location=None,
                  verbose=False, generate_reel_flag=False,
-                 clip_before=8.0, clip_after=5.0):
+                 clip_before=8.0, clip_after=5.0,
+                 player_filter=None, team_filter=None):
         self.video_path = video_path
         self.sample_interval = sample_interval
         self.depth = depth
@@ -285,6 +286,8 @@ class VideoOrchestrator:
         self.generate_reel = generate_reel_flag
         self.clip_before = clip_before
         self.clip_after = clip_after
+        self.player_filter = player_filter
+        self.team_filter = team_filter
         self.ctx = None
 
     def _run_parallel(self, client, tasks):
@@ -514,12 +517,20 @@ class VideoOrchestrator:
 
         reel_paths = {}
         if self.generate_reel and self.ctx.key_events:
+            flavors = ["all", "goals", "drama", "social_goals"]
+            if self.player_filter:
+                flavors = []
+            if self.team_filter:
+                flavors = []
+
             print("\nGenerating reels:")
             reel_paths = generate_all_reels(
                 self.video_path, self.ctx.key_events, video_stem,
-                flavors=["all", "goals", "drama", "social_goals"],
+                flavors=flavors or None,
                 clip_before=self.clip_before,
                 clip_after=self.clip_after,
+                player=self.player_filter,
+                team=self.team_filter,
             )
 
         if not self.report_only:
