@@ -1870,6 +1870,61 @@ function drawPitch() {
   }
   
   drawDynamicPhaseHighlights(w, h);
+  drawBallMarkerOnCanvas(w, h);
+}
+
+// track last ball position for drawing
+let _ballPos = null;
+let _ballTimestamp = 0;
+
+function drawBallMarker(pos) {
+  _ballPos = pos;
+  _ballTimestamp = Date.now();
+}
+
+function drawBallMarkerOnCanvas(w, h) {
+  if (!_ballPos || !pitchCtx) return;
+  // fade out after 3 seconds of no updates
+  if (Date.now() - _ballTimestamp > 3000) { _ballPos = null; return; }
+
+  const pad = 12;
+  const fw = w - pad * 2;
+  const fh = h - pad * 2;
+  const cx = w / 2;
+  const cy = h / 2;
+
+  let bx, by;
+  const bp = _ballPos.toLowerCase();
+
+  // map ball position text to pitch canvas coordinates (deterministic per zone)
+  if (bp.includes('in_net') || bp.includes('near_goal')) {
+    bx = w - pad - 18; by = cy;
+  } else if (bp.includes('penalty_area') || bp.includes('attacking')) {
+    bx = w - pad - fw * 0.12; by = cy;
+  } else if (bp.includes('midfield')) {
+    bx = cx; by = cy;
+  } else if (bp.includes('defensive_third') || bp.includes('defending')) {
+    bx = pad + fw * 0.22; by = cy;
+  } else if (bp.includes('out_of_play')) {
+    _ballPos = null; return;
+  } else {
+    return;
+  }
+
+  // draw ball with glow
+  pitchCtx.save();
+  pitchCtx.shadowColor = '#ffffff';
+  pitchCtx.shadowBlur = 8;
+  pitchCtx.fillStyle = '#ffffff';
+  pitchCtx.beginPath();
+  pitchCtx.arc(bx, by, 5, 0, Math.PI * 2);
+  pitchCtx.fill();
+  pitchCtx.restore();
+
+  // draw label
+  pitchCtx.fillStyle = '#fff';
+  pitchCtx.font = '9px Inter';
+  pitchCtx.fillText('⚽', bx - 6, by - 10);
 }
 
 function drawSoccerField(w, h) {
@@ -2263,6 +2318,12 @@ function handleWebSocketEvent(data) {
       
     case 'score':
       setStat('score-val', `${data.home}-${data.away}`);
+      break;
+
+    case 'ball_position':
+      drawBallMarker(data.ball_position);
+      // redraw pitch with ball marker after a short delay (let pitch draw first)
+      setTimeout(() => drawPitch(), 50);
       break;
 
     case 'status':

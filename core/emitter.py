@@ -13,6 +13,9 @@ class EventEmitter:
     def on_agent_active(self, agent_name):
         pass
 
+    def on_ball_position(self, ball_position, timestamp):
+        pass
+
     def on_scene(self, timestamp, scene_type, activity, scene_raw):
         pass
 

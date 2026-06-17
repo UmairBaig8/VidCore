@@ -77,6 +77,10 @@ class WebSocketEmitter(EventEmitter):
     def on_agent_active(self, agent_name):
         self._send({"type": "agent_active", "agent": agent_name})
 
+    def on_ball_position(self, ball_position, timestamp):
+        self._send({"type": "ball_position", "ball_position": ball_position,
+                     "timestamp": timestamp})
+
     def on_scene(self, timestamp, scene_type, activity, scene_raw):
         self._send({"type": "scene", "timestamp": timestamp,
                      "scene_type": scene_type, "activity": activity})

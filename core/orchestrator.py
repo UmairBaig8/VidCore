@@ -541,7 +541,7 @@ class VideoOrchestrator:
             event_dict = {
                 "timestamp": f"{timestamp:.1f}s",
                 "scene": scene_desc,
-                "scene_type": _parse_json_safe(scene_desc).get("scene_type", "unknown"),
+                "scene_type": scene_parsed.get("scene_type", "unknown"),
                 "phase": self.ctx.phase,
                 "score": self.ctx.score_string(),
                 "key_events": json.dumps(key_events) if key_events else "",
@@ -554,10 +554,15 @@ class VideoOrchestrator:
             timeline.add(event_dict)
 
             # ── emitter events ──
-            stype = event_dict["scene_type"]
+            scene_parsed = _parse_json_safe(scene_desc)
+            stype = scene_parsed.get("scene_type", "unknown")
             self.emitter.on_scene(f"{timestamp:.1f}s", stype,
-                                  _parse_json_safe(scene_desc).get("activity", ""),
+                                  scene_parsed.get("activity", ""),
                                   scene_desc)
+
+            ball_pos = scene_parsed.get("ball_position", "")
+            if ball_pos and ball_pos != "not_visible":
+                self.emitter.on_ball_position(ball_pos, f"{timestamp:.1f}s")
 
             if key_events:
                 for ev in key_events:
