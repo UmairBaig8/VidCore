@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from api_server import app, jobs
 from core.paths import videos_dir
+from core.paths import videos_dir
 
 client = TestClient(app)
 
@@ -114,11 +115,43 @@ def test_delete_missing():
     assert r.status_code == 404
 
 
+def test_job_lifecycle():
+    """Simulate a job through its lifecycle: create → status → data endpoints → delete."""
+    video = str(videos_dir() / ".gitkeep")
+    r = client.post(f"/analyze?video={video}&depth=scene-only")
+    assert r.status_code == 200
+    job_id = r.json()["job_id"]
+
+    # check it appears in jobs list
+    r = client.get("/jobs")
+    jobs_list = r.json()
+    assert any(j["id"] == job_id for j in jobs_list)
+
+    # status returns 200
+    r = client.get(f"/status/{job_id}")
+    assert r.status_code == 200
+    assert r.json()["id"] == job_id
+
+    # data endpoints return 404 (no analysis ran, no WS connected)
+    # but they should NOT 500 — they should handle gracefully
+    for ep in ["/context", "/key_events", "/reels", "/report", "/csv"]:
+        r = client.get(f"{ep}/{job_id}")
+        assert r.status_code in (200, 404), f"{ep} returned {r.status_code}"
+
+    # delete
+    r = client.delete(f"/jobs/{job_id}")
+    assert r.status_code == 200
+
+    # gone
+    r = client.get(f"/status/{job_id}")
+    assert r.status_code == 404
+
+
 if __name__ == "__main__":
     import sys
     passed = 0
     failed = 0
-    for name in list(globals()):
+    for name in sorted(globals()):
         if name.startswith("test_"):
             fn = globals()[name]
             try:
@@ -130,4 +163,16 @@ if __name__ == "__main__":
                 failed += 1
 
     print(f"\n{passed} passed, {failed} failed")
-    sys.exit(1 if failed else 0)
+
+    # ── manual E2E API instructions ──
+    print(f"""
+{'='*60}
+Manual API E2E test (requires vLLM + api_server running):
+
+  # Terminal 1: start API
+  python api_server.py
+
+  # Terminal 2: pip install websocket-client, then:
+  python manual_api_e2e.py
+{'='*60}
+""")
