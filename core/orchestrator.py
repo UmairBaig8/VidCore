@@ -13,6 +13,7 @@ from skills.frame_sampler import sample_frames, count_frames
 from skills.frame_encoder import encode_frame
 from skills.timeline import Timeline
 from skills.report_generator import save_report
+from skills.csv_writer import save_csv
 
 MAX_RETRIES = 3
 RETRY_BACKOFF = 2
@@ -138,6 +139,9 @@ class VideoOrchestrator:
         if not self.stream_mode and not self.report_only:
             print()
 
+        video_stem = Path(self.video_path).stem
+        csv_path = save_csv(timeline.events, video_stem)
+
         highlights = ""
         if highlight_prompt and timeline.events:
             highlights = _ask_with_retry(
@@ -164,10 +168,11 @@ class VideoOrchestrator:
                 f"## Full Analysis\n\n{final_summary}"
             )
 
-        report_path = save_report(final_summary, Path(self.video_path).stem)
+        report_path = save_report(final_summary, video_stem)
 
         if not self.report_only:
-            print(f"\nReport: {report_path}")
+            print(f"\nCSV:    {csv_path}")
+            print(f"Report: {report_path}")
         else:
             print(report_path)
 

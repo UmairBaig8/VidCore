@@ -213,6 +213,25 @@ def test_models():
     test("summary stored", lambda: r.summary == "test summary")
 
 
+# ─── CSV writer ──────────────────────────────────────────────────────────────
+
+def test_csv_writer():
+    print("\nCSV Writer")
+    from skills.csv_writer import save_csv
+    events = [
+        {"timestamp": "0.0s", "scene": "outdoor", "event": "movement", "reasoning": "low", "commentary": "person walking"},
+        {"timestamp": "0.5s", "scene": "indoor", "event": "none", "reasoning": "", "commentary": ""},
+    ]
+    path = save_csv(events, "test_csv")
+    test("creates csv file", lambda: path.exists())
+    content = path.read_text()
+    test("has header", lambda: "timestamp,scene,event,reasoning,commentary" in content)
+    test("has row 1", lambda: "outdoor" in content and "person walking" in content)
+    test("has row 2", lambda: "indoor" in content)
+    path.unlink()
+    path.parent.rmdir()
+
+
 # ─── Video loader ───────────────────────────────────────────────────────────
 
 def test_video_loader():
@@ -319,6 +338,7 @@ if __name__ == "__main__":
     test_frame_sampler()
     test_report()
     test_models()
+    test_csv_writer()
     test_video_loader()
     test_orchestrator()
     test_format_events()
