@@ -2251,7 +2251,12 @@ function handleWebSocketEvent(data) {
       // SSE bundles phase/score/sport into one event
       if (data.phase) { currentPhase = data.phase; setStat('phase-val', currentPhase); }
       if (data.score) setStat('score-val', data.score);
-      if (data.sport) { setStat('sport-val', data.sport); markCheck('check-sport', data.sport); }
+      if (data.sport) {
+        currentSport = data.sport;
+        setStat('sport-val', 'Sport: ' + data.sport);
+        document.getElementById('sport-field-label').textContent = data.sport.toUpperCase() + ' GRAPH';
+        markCheck('check-sport', data.sport);
+      }
       if (data.video_type) markCheck('check-type', data.video_type);
       if (data.location && data.location !== 'unknown') {
         markCheck('check-location', data.location);
