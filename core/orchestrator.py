@@ -538,6 +538,8 @@ class VideoOrchestrator:
             if self.ctx.phase != old_phase:
                 self.emitter.on_phase_change(self.ctx.phase)
 
+            scene_parsed = _parse_json_safe(scene_desc)
+
             event_dict = {
                 "timestamp": f"{timestamp:.1f}s",
                 "scene": scene_desc,
@@ -554,7 +556,6 @@ class VideoOrchestrator:
             timeline.add(event_dict)
 
             # ── emitter events ──
-            scene_parsed = _parse_json_safe(scene_desc)
             stype = scene_parsed.get("scene_type", "unknown")
             self.emitter.on_scene(f"{timestamp:.1f}s", stype,
                                   scene_parsed.get("activity", ""),

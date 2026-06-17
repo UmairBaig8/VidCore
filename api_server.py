@@ -144,6 +144,8 @@ def _run_analysis(job_id, video_path, **kwargs):
             jobs[job_id]["sport"] = orchestrator.ctx.sport
             jobs[job_id]["score"] = orchestrator.ctx.score_string()
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         if job_id in jobs:
             jobs[job_id]["status"] = "error"
             jobs[job_id]["error"] = str(e)
