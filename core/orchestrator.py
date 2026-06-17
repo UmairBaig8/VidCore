@@ -117,7 +117,7 @@ def _detect_sport(client, video_path):
     cap.release()
     if votes:
         best = max(votes, key=votes.get)
-        return {"sport": best, "confidence": votes[best] / len(votes)}
+        return {"sport": best, "confidence": min(votes[best] / len(offsets), 1.0)}
     return {"sport": "generic", "confidence": 0.0}
 
 
@@ -175,8 +175,17 @@ def _classify_video(client, video_path, interval):
         t = s.get("video_type", "full_match")
         tally[t] = tally.get(t, 0) + 1
     best_type = max(tally, key=tally.get)
+    confidence = tally[best_type] / len(samples)
+
+    if confidence < 0.5 and len(tally) > 1:
+        del tally[best_type]
+        runner_up = max(tally, key=tally.get)
+        print(f"  ⚠ low confidence ({confidence:.0%}), falling back to {runner_up}", file=sys.stderr)
+        best_type = runner_up
+        confidence = tally[runner_up] / (len(samples) - tally.get(best_type, 0) or 1)
+
     return {"video_type": best_type,
-            "confidence": tally[best_type] / len(samples),
+            "confidence": confidence,
             "evidence": samples[0].get("evidence", ""),
             "tally": tally}
 
@@ -444,9 +453,15 @@ class VideoOrchestrator:
                 prefix = ""
                 if key_events:
                     prefix = " ".join(f"[{e['type']}]" for e in key_events)
-                print(f"\n[{timestamp:.1f}s] {prefix} {scene_desc[:200]}")
+                short = _parse_json_safe(scene_desc)
+                stype = short.get("scene_type", "")
+                activity = short.get("activity", "")
+                summary = f"{stype}: {activity}" if stype else scene_desc[:200]
+                print(f"\n[{timestamp:.1f}s] {prefix} {summary}")
+                if event_str:
+                    print(f"  * {event_str[:250]}")
                 if commentary_str:
-                    print(f"  > {commentary_str[:200]}")
+                    print(f"  > {commentary_str[:250]}")
                 print()
             elif not self.report_only:
                 bar_len = 30

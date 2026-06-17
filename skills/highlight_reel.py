@@ -29,6 +29,21 @@ def _ffmpeg_available():
         return False
 
 
+_FFMPEG_CHECKED = False
+_FFMPEG_OK = False
+
+
+def _check_ffmpeg():
+    global _FFMPEG_CHECKED, _FFMPEG_OK
+    if not _FFMPEG_CHECKED:
+        _FFMPEG_OK = _ffmpeg_available()
+        _FFMPEG_CHECKED = True
+        if not _FFMPEG_OK:
+            print("\n  ⚠ ffmpeg not found — reels may be unplayable."
+                  "\n  Install: apt install ffmpeg  (Ubuntu)  or  brew install ffmpeg  (macOS)")
+    return _FFMPEG_OK
+
+
 def _extract_clip_ffmpeg(video_path, start_sec, duration, out_path, crop_vertical=False):
     vf = ""
     if crop_vertical:
@@ -116,7 +131,7 @@ def generate_reel(video_path, key_events, video_name,
     if not timestamps:
         return None
 
-    use_ffmpeg = _ffmpeg_available()
+    use_ffmpeg = _check_ffmpeg()
     is_vertical = flavor_cfg["format"] == "vertical"
 
     out_dir = output_dir() / "reels"
