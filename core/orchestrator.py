@@ -40,7 +40,7 @@ def _format_events_for_summary(timeline):
     for i, ev in enumerate(timeline.events, 1):
         t = ev.get("timestamp", "?")
         result = ev.get("result", ev.get("description", ""))
-        lines.append(f"## Event {i} [{t:.1f}s]\n{result}\n")
+        lines.append(f"## Event {i} [{t}]\n{result}\n")
     return "\n---\n".join(lines)
 
 
