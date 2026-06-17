@@ -229,7 +229,6 @@ def test_csv_writer():
     test("has row 1", lambda: "outdoor" in content and "person walking" in content)
     test("has row 2", lambda: "indoor" in content)
     path.unlink()
-    path.parent.rmdir()
 
 
 # ─── Classification ─────────────────────────────────────────────────────────
