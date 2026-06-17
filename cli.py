@@ -80,6 +80,10 @@ def analyze(
         None, "--location",
         help="Manual location override (stadium/venue name). Auto-detect if omitted."
     ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v",
+        help="Show agent routing decisions per frame"
+    ),
 ):
     """Analyze a video"""
     from pathlib import Path
@@ -100,6 +104,7 @@ def analyze(
         live=live,
         classify=not no_classify,
         location=location,
+        verbose=verbose,
     )
     orchestrator.run()
 

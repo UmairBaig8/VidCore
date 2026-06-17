@@ -236,19 +236,19 @@ def test_csv_writer():
 
 def test_classification():
     print("\nClassification")
-    from core.orchestrator import _parse_classification, _load_type_prompts
+    from core.orchestrator import _parse_json_safe, _load_type_prompts
 
     test("full_match parsed", lambda:
-         _parse_classification('{"video_type":"full_match","confidence":0.9}')["video_type"] == "full_match")
+         _parse_json_safe('{"video_type":"full_match","confidence":0.9}')["video_type"] == "full_match")
 
     test("highlights parsed", lambda:
-         _parse_classification('{"video_type":"highlights","confidence":0.8}')["video_type"] == "highlights")
+         _parse_json_safe('{"video_type":"highlights","confidence":0.8}')["video_type"] == "highlights")
 
     test("code-fenced JSON stripped", lambda:
-         _parse_classification('```json\n{"video_type":"training"}\n```')["video_type"] == "training")
+         _parse_json_safe('```json\n{"video_type":"training"}\n```')["video_type"] == "training")
 
-    test("junk text falls back to full_match", lambda:
-         _parse_classification("not json at all")["video_type"] == "full_match")
+    test("junk text falls back to empty", lambda:
+         _parse_json_safe("not json at all") == {})
 
     prompts = _load_type_prompts()
     test("type_prompts.json loads", lambda: isinstance(prompts, dict) and len(prompts) >= 4)
