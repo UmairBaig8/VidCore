@@ -113,10 +113,11 @@ def _run_analysis(job_id, video_path, **kwargs):
             jobs[job_id]["sport"] = orchestrator.ctx.sport
             jobs[job_id]["score"] = orchestrator.ctx.score_string()
     except Exception as e:
-        jobs[job_id]["status"] = "error"
-        jobs[job_id]["error"] = str(e)
-        if jobs[job_id].get("emitter"):
-            jobs[job_id]["emitter"].on_error(str(e))
+        if job_id in jobs:
+            jobs[job_id]["status"] = "error"
+            jobs[job_id]["error"] = str(e)
+            if jobs[job_id].get("emitter"):
+                jobs[job_id]["emitter"].on_error(str(e))
     finally:
         job_semaphore.release()
 

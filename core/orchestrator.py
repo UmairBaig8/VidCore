@@ -247,12 +247,11 @@ def _update_context_from_scene(ctx, scene_desc):
         if ctx.phase in ("kickoff", "commercial", "unknown"):
             ctx.update_phase("open_play")
 
-    # ── score extraction: look for patterns like "ROM 2-0 VER" or "2-1" or "1-0" ──
+    # ── score extraction: only match score-like patterns, not jersey numbers ──
     score_patterns = [
-        r'(?:ROM|VER|[A-Z]{3})\s*(\d+)\s*[-–]\s*(\d+)\s*(?:ROM|VER|[A-Z]{3})?',
-        r'score\S*\s*(\d+)\s*[-–]\s*(\d+)',
-        r'(?:leads?|leading|winning)\s*(\d+)\s*[-–]\s*(\d+)',
-        r'\b(\d+)\s*[-–]\s*(\d+)\b',
+        r'(?:ROM|VER|PSV|DOR|[A-Z]{2,4})\s*(\d+)\s*[-–]\s*(\d+)\s*(?:ROM|VER|PSV|DOR|[A-Z]{2,4})?',
+        r'(?:score|Score)\S*\s*(\d+)\s*[-–]\s*(\d+)',
+        r'(?:leads?|leading|winning|trailing|tied)\s+(\d+)\s*[-–]\s*(\d+)',
     ]
     for pat in score_patterns:
         m = re.search(pat, scene_desc, re.IGNORECASE)
@@ -551,9 +550,6 @@ class VideoOrchestrator:
 
         report_path = save_report(header + final_summary, video_stem)
 
-        self.emitter.on_complete(str(report_path), str(csv_path),
-                                 reel_paths, len(self.ctx.key_events))
-
         reel_paths = {}
         if self.generate_reel:
             if live_reel:
@@ -590,5 +586,8 @@ class VideoOrchestrator:
                     print(f"Reel:   {path} ({flavor})")
         else:
             print(report_path)
+
+        self.emitter.on_complete(str(report_path), str(csv_path),
+                                 reel_paths, len(self.ctx.key_events))
 
         return report_path
