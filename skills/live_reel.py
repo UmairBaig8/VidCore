@@ -47,12 +47,17 @@ class LiveReelBuilder:
         idx = len(self.clips)
 
         clip_path = self.out_dir / f"{self.video_name}_live_{idx:03d}.mp4"
-        self._extract_clip(start, duration, clip_path)
 
-        overlay_path = self._add_event_overlay(clip_path, event_type, t, team, idx)
+        try:
+            self._extract_clip(start, duration, clip_path)
+        except Exception as e:
+            print(f"\n    ⚠ clip extract failed: {e}", flush=True)
+            return None
+
+        overlay_path = self._add_event_overlay(clip_path, event_type, t, team, idx) or clip_path
 
         self.clips.append({
-            "path": str(overlay_path or clip_path),
+            "path": str(overlay_path),
             "timestamp": t,
             "event_type": event_type,
             "team": team,
@@ -61,11 +66,17 @@ class LiveReelBuilder:
         })
         self.events_log.append(event)
 
-        # write manifest for dashboard to read
         self._write_manifest()
 
-        # update the growing reel immediately
-        self._update_growing_reel()
+        try:
+            self._update_growing_reel()
+        except Exception as e:
+            print(f"\n    ⚠ reel concat failed: {e}", flush=True)
+
+        mm, ss = int(t // 60), int(t % 60)
+        print(f"\n  📼 [{mm:02d}:{ss:02d}] {event_type}"
+              f"{' (' + team + ')' if team else ''} "
+              f"→ clip {idx} ({len(self.clips)} total)", flush=True)
 
         return self.clips[-1]
 
@@ -88,14 +99,18 @@ class LiveReelBuilder:
             concat_file.unlink(missing_ok=True)
 
     def _extract_clip(self, start_sec, duration, out_path):
-        subprocess.run([
-            "ffmpeg", "-y", "-loglevel", "error",
-            "-ss", str(start_sec),
-            "-i", str(self.video_path),
-            "-t", str(duration),
-            "-c", "copy",
-            str(out_path),
-        ], check=True)
+        try:
+            subprocess.run([
+                "ffmpeg", "-y", "-loglevel", "warning",
+                "-ss", str(start_sec),
+                "-i", str(self.video_path),
+                "-t", str(duration),
+                "-c", "copy",
+                str(out_path),
+            ], check=True, timeout=30)
+        except subprocess.CalledProcessError as e:
+            print(f"\n    ⚠ clip extraction failed (time={start_sec:.1f}s): {e}", flush=True)
+            raise
 
     def _add_event_overlay(self, clip_path, event_type, timestamp, team, idx):
         """Add text overlay showing event type + time on the clip."""
@@ -120,16 +135,16 @@ class LiveReelBuilder:
 
         try:
             subprocess.run([
-                "ffmpeg", "-y", "-loglevel", "error",
+                "ffmpeg", "-y", "-loglevel", "warning",
                 "-i", str(clip_path),
                 "-vf", vf,
                 "-c:a", "copy",
                 str(tmp),
-            ], check=True)
+            ], check=True, timeout=30)
             tmp.replace(clip_path)
-            return clip_path
         except Exception:
             return clip_path
+        return clip_path
 
     def _write_manifest(self):
         import json
