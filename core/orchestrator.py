@@ -397,6 +397,15 @@ class VideoOrchestrator:
         client = VLLMClient(cfg["vllm_endpoint"], cfg["model"])
         timeline = Timeline()
 
+        # ── count frames first (instant, no VLM) — emit progress bar immediately ──
+        if self.live:
+            total_frames = count_live_frames(self.video_path, self.sample_interval)
+        else:
+            total_frames = count_frames(self.video_path, self.sample_interval)
+        video_stem = Path(self.video_path).stem
+        self.emitter.on_progress(0, total_frames, 0)
+        logger.info("video: %s, %d frames to process", video_stem, total_frames)
+
         # ── detection phase (parallel — 3x faster) ──
         from concurrent.futures import ThreadPoolExecutor as TPE, as_completed as ac
 
@@ -468,16 +477,12 @@ class VideoOrchestrator:
 
         if self.live:
             sampler = sample_live
-            counter = count_live_frames
         else:
             sampler = sample_frames
-            counter = count_frames
 
-        total_frames = counter(self.video_path, self.sample_interval)
         processed = 0
-        video_stem = Path(self.video_path).stem
 
-        # emit detection complete + initial progress BEFORE frame loop starts
+        # emit detection complete BEFORE frame loop starts
         self.emitter.on_detection_complete(
             sport=sport_id, video_type=vt,
             location=geo.get("stadium", geo.get("city", "")),
@@ -485,7 +490,6 @@ class VideoOrchestrator:
             teams=geo.get("teams", []),
             total_frames=total_frames,
         )
-        self.emitter.on_progress(0, total_frames, 0)
 
         # live mode: progress is wall-clock, not frame count
         video_duration = None
