@@ -419,13 +419,8 @@ async function startAnalysis() {
   const job = await r.json();
   jobId = job.job_id;
 
-  // Load source video immediately
-  const pw = document.getElementById('player-window');
-  if (pw) pw.innerHTML = `
-    <video class="video-element" id="live-player" controls autoplay muted playsinline>
-      <source src="${API}/videos/${selectedVideoName}" type="video/mp4">
-    </video>
-  `;
+  // Video loads AFTER detection_complete event (handled in websocket handler)
+
 
   // Initialize Socket connection
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -550,6 +545,32 @@ function handleWebSocketEvent(data) {
     case 'connected':
       document.getElementById('events').innerHTML = '';
       document.getElementById('analyze-btn').textContent = '⚡ Analyzing frames...';
+      break;
+
+    case 'detection':
+      if (data.sport) setStat('sport-val', data.sport);
+      if (data.location) setStat('location-val', data.location);
+      if (data.league) setStat('league-val', data.league);
+      break;
+
+    case 'detection_complete':
+      // classification done — load video player and update stats
+      if (data.sport) setStat('sport-val', data.sport);
+      if (data.video_type) setStat('type-val', data.video_type);
+      if (data.location) setStat('location-val', data.location);
+      if (data.league) setStat('league-val', data.league);
+      if (data.teams) setStat('teams-val', data.teams.join(', '));
+      document.getElementById('player-placeholder-msg').textContent = 'Model loaded — processing frames...';
+      // load video now that detection is complete
+      const pw = document.getElementById('player-window');
+      const spinner = document.getElementById('player-spinner');
+      if (pw && spinner) {
+        pw.innerHTML = `
+          <video class="video-element" id="live-player" controls autoplay muted playsinline>
+            <source src="${API}/videos/${selectedVideoName}" type="video/mp4">
+          </video>
+        `;
+      }
       break;
       
     case 'scene':

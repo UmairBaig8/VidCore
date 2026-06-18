@@ -74,15 +74,15 @@ class WebSocketEmitter(EventEmitter):
 
     def _send(self, data):
         t = data.get("type", "?")
-        if t not in ("yolo",):  # don't log per-frame yolo spam
+        if t not in ("yolo",):
             logger.info("ws → %s %s", t, {k: v for k, v in data.items() if k != "type"})
         try:
             future = asyncio.run_coroutine_threadsafe(
                 self.ws.send_json(data), self.loop
             )
             future.result(timeout=5)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("ws send failed: %s", e)
 
     def on_detection(self, sport, video_type, location, league, teams):
         self._send({"type": "detection", "sport": sport,

@@ -2375,6 +2375,23 @@ function handleWebSocketEvent(data) {
       drawPitch();
       startVideoIfReady();
       break;
+
+    case 'detection_complete':
+      // all classification done + frame count known — start video now
+      if (data.sport) setStat('sport-val', 'Sport: ' + data.sport);
+      if (data.video_type) setStat('type-val', 'Match Type: ' + data.video_type);
+      if (data.location) setStat('location-val', data.location);
+      if (data.league) setStat('league-val', data.league);
+      if (data.teams) {
+        document.getElementById('info-content').innerHTML = `<div style="padding:8px;"><b>Teams:</b> ${data.teams.join(', ')}</div>`;
+      }
+      markCheck('check-sport', data.sport || 'done');
+      markCheck('check-type', data.video_type || 'done');
+      markCheck('check-location', data.location || 'done');
+      if (_videoTimeout) { clearTimeout(_videoTimeout); _videoTimeout = null; }
+      _startVideoNow();
+      if (data.total_frames) setProgressBar(0);
+      break;
       
     case 'scene':
       startVideoIfReady();
@@ -2417,8 +2434,25 @@ function handleWebSocketEvent(data) {
 
     case 'ball_position':
       drawBallMarker(data.ball_position);
-      // redraw pitch with ball marker after a short delay (let pitch draw first)
       setTimeout(() => drawPitch(), 50);
+      break;
+
+    case 'yolo':
+      if (data.ball_zone) {
+        document.getElementById('classify-status').textContent =
+          `YOLO: ${data.ball_zone} | players: ${data.player_count}`;
+      }
+      break;
+
+    case 'analysis_complete':
+      setStat('events-val', data.event_count);
+      setStat('score-val', data.score);
+      document.getElementById('classify-status').textContent = 'Generating highlight reels...';
+      break;
+
+    case 'reel_progress':
+      document.getElementById('classify-status').textContent =
+        `Reel ${data.idx}/${data.total}: ${data.flavor}`;
       break;
 
     case 'status':
