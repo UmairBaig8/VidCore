@@ -27,7 +27,7 @@ from skills.csv_writer import save_csv
 from skills.highlight_reel import generate_all_reels
 from skills.live_reel import LiveReelBuilder
 
-# lazy YOLO model — loaded once, used for goal validation
+# lazy YOLO model — loaded once, used to filter false GOAL detections
 _yolo_model = None
 
 
@@ -42,18 +42,18 @@ def _get_yolo():
     return _yolo_model if _yolo_model is not False else None
 
 
-def _validate_goal_with_yolo(frame):
-    """Returns True if YOLO confirms goal-area activity (ball + players near penalty zone)."""
+def _yolo_has_goal_activity(frame):
+    """YOLO check: ball must be in bottom third + players near goal area.
+    Returns True if frame shows plausible goal-area activity, False if ball is clearly elsewhere."""
     model = _get_yolo()
     if model is None:
-        return True  # no YOLO — trust VLM
+        return True
     try:
         results = model(frame, verbose=False)
         h, w = frame.shape[:2]
-        # penalty area is roughly bottom-left or bottom-right third of frame
-        # check for sports ball (class 32) and persons (class 0) in bottom third
-        ball_near_goal = False
-        players_in_box = 0
+        ball_y = -1
+        ball_cx = -1
+        players_near_goal = 0
         for r in results:
             for box in r.boxes:
                 cls = int(box.cls[0])
@@ -61,18 +61,16 @@ def _validate_goal_with_yolo(frame):
                 x1 = float(box.xyxy[0][0])
                 x2 = float(box.xyxy[0][2])
                 cx = (x1 + x2) / 2
-                in_bottom = y1 > h * 0.55  # bottom 45% of frame
-                near_left = cx < w * 0.40   # left third
-                near_right = cx > w * 0.60  # right third
-                in_goal_area = in_bottom and (near_left or near_right)
-                if cls == 32 and in_goal_area:  # sports ball
-                    ball_near_goal = True
-                if cls == 0 and in_goal_area:   # person
-                    players_in_box += 1
-        # goal confirmed if ball near goal OR 2+ players in penalty area
-        return ball_near_goal or players_in_box >= 2
+                if cls == 32:  # sports ball
+                    ball_y = y1
+                    ball_cx = cx
+                if cls == 0 and y1 > h * 0.50:  # person in bottom half
+                    players_near_goal += 1
+        # ball must be in bottom 40% — if ball is in midfield/top, not a goal
+        ball_in_attacking_zone = ball_y > h * 0.60
+        return ball_in_attacking_zone and players_near_goal >= 1
     except Exception:
-        return True  # YOLO error — trust VLM
+        return True
 
 logger = logging.getLogger("orchestrator")
 
@@ -637,31 +635,27 @@ class VideoOrchestrator:
                         self.ctx.update_phase(parsed["phase"])
                     # split: significant events trigger reasoning/commentary/reels
                     sig_events = [e for e in key_events if e.get("type") != "GOAL_ATTEMPT"]
-                    # GOAL validation gate: reject GOAL if scene doesn't confirm it
-                    goal_keywords = ["celebration", "celebrating", "net", "goal scored",
-                                     "ball in the net", "scoreboard", "arms raised",
-                                     "sliding on knees", "fist pump", "hugging"]
-                    has_goal_context = any(kw in scene_desc.lower() for kw in goal_keywords)
+                    # GOAL validation gate: require multiple confirming signals
+                    goal_confirm = ["celebration", "celebrating", "arms raised",
+                                    "sliding on knees", "fist pump", "hugging",
+                                    "players running", "crowd", "jumping"]
+                    goal_miss = ["missed", "wide", "over the bar", "saved",
+                                 "blocked", "cleared", "deflected", "goalkeeper saves",
+                                 "hands on head", "disappointed", "nearly", "almost",
+                                 "outside the box", "side netting"]
+                    confirm_count = sum(1 for kw in goal_confirm if kw in scene_desc.lower())
+                    miss_count = sum(1 for kw in goal_miss if kw in scene_desc.lower())
+                    has_goal_context = confirm_count >= 2 and miss_count == 0
                     validated_goals = []
                     for ev in sig_events:
                         if ev.get("type") == "GOAL":
-                            if has_goal_context:
+                            if has_goal_context and _yolo_has_goal_activity(frame):
                                 validated_goals.append(ev)
                             else:
+                                reason = "no scene confirmation" if not has_goal_context else "YOLO: ball not in attacking zone"
                                 ev = dict(ev, type="GOAL_ATTEMPT")
-                                logger.debug("  downgraded GOAL → GOAL_ATTEMPT (no scene confirmation)")
+                                logger.debug("  downgraded GOAL → GOAL_ATTEMPT (%s)", reason)
                         validated_goals.append(ev)
-                    # YOLO cross-check: verify goal-area activity in the actual frame
-                    for ev in validated_goals:
-                        if ev.get("type") == "GOAL":
-                            if not _validate_goal_with_yolo(frame):
-                                ev["type"] = "GOAL_ATTEMPT"
-                                logger.debug("  downgraded GOAL → GOAL_ATTEMPT (YOLO: no goal-area activity)")
-                                # also downgrade in ctx.key_events for consistency
-                                for ctx_ev in self.ctx.key_events:
-                                    if ctx_ev.get("timestamp") == ev.get("timestamp") and ctx_ev.get("type") == "GOAL":
-                                        ctx_ev["type"] = "GOAL_ATTEMPT"
-                                        break
                     sig_events = validated_goals
                     # score fallback: only if scoreboard has NEVER read a score (not just not recently)
                     sb_has_read = any(h > 0 or a > 0 for h, a, _ in sb_history)
