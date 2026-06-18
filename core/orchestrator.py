@@ -149,23 +149,38 @@ def _classify_video(client, video_path, interval):
     cap = open_video(video_path)
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    # skip first 10s (intro graphics), sample middle frame
-    off = max(min(total // 2, total - 1), int(fps * 10))
-    cap.set(cv2.CAP_PROP_POS_FRAMES, off)
-    ret, frame = cap.read()
+
+    # sample 3 frames spread across the video for reliable classification
+    positions = [
+        int(fps * 15),                 # early (skip intro)
+        int(total * 0.50),             # mid
+        max(total - int(fps * 30), 0), # late (avoid credits)
+    ]
+    frames_b64 = []
+    for pos in positions:
+        pos = max(0, min(pos, total - 1))
+        cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
+        ret, frame = cap.read()
+        if ret:
+            b64 = encode_frame(frame)
+            if b64:
+                frames_b64.append(b64)
     cap.release()
-    if not ret:
+
+    if not frames_b64:
         return {"video_type": "full_match", "confidence": 0.0,
-                "evidence": "no frame extracted"}
-    b64 = encode_frame(frame)
-    if not b64:
-        return {"video_type": "full_match", "confidence": 0.0,
-                "evidence": "encode failed"}
-    result = _ask_with_retry(client, classifier_prompt, b64, label="classify")
+                "evidence": "no frames extracted"}
+
+    # send all sampled frames to classifier
+    multi_prompt = (f"{classifier_prompt}\n\n"
+                    f"You are shown {len(frames_b64)} frames from different timestamps. "
+                    f"Consider patterns across ALL frames to classify the video type. "
+                    f"Reply with JSON only.")
+    result = _ask_with_retry(client, multi_prompt, frames_b64, label="classify")
     if result:
         parsed = _parse_json_safe(result)
         return {"video_type": parsed.get("video_type", "full_match"),
-                "confidence": 0.8,
+                "confidence": parsed.get("confidence", 0.8),
                 "evidence": parsed.get("evidence", "")}
     return {"video_type": "full_match", "confidence": 0.0,
             "evidence": "no response"}
