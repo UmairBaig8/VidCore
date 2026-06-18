@@ -538,7 +538,7 @@ class VideoOrchestrator:
                     for e in events:
                         e["timestamp"] = f"{timestamp:.1f}s"
                     key_events = router.process_event(events)
-                    # deduplicate: if GOAL detected within 4s of GOAL_ATTEMPT, merge
+                    # dedup: if GOAL detected within 4s of GOAL_ATTEMPT, merge
                     if len(self.ctx.key_events) >= 2:
                         prev = self.ctx.key_events[-1]
                         curr = key_events[0] if key_events else None
@@ -552,6 +552,19 @@ class VideoOrchestrator:
                                     key_events = []
                             except (ValueError, TypeError):
                                 pass
+                    # dedup: skip duplicate GOAL within 6s of previous GOAL
+                    if key_events and self.ctx.key_events:
+                        prev = self.ctx.key_events[-1]
+                        for ev in list(key_events):
+                            if ev.get("type") == "GOAL" and prev.get("type") == "GOAL":
+                                try:
+                                    pt = float(prev.get("timestamp", "0").replace("s", ""))
+                                    ct = float(ev.get("timestamp", "0").replace("s", ""))
+                                    if ct - pt < 6.0:
+                                        key_events.remove(ev)
+                                        logger.debug("  dedup: skipped duplicate GOAL at %.1fs (prev=%.1fs)", ct, pt)
+                                except (ValueError, TypeError):
+                                    pass
                     # update momentum from event data
                     if "possession_home" in parsed:
                         self.ctx.update_momentum(int(parsed["possession_home"]))
