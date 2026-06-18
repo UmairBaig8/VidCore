@@ -27,6 +27,53 @@ from skills.csv_writer import save_csv
 from skills.highlight_reel import generate_all_reels
 from skills.live_reel import LiveReelBuilder
 
+# lazy YOLO model — loaded once, used for goal validation
+_yolo_model = None
+
+
+def _get_yolo():
+    global _yolo_model
+    if _yolo_model is None:
+        try:
+            from ultralytics import YOLO
+            _yolo_model = YOLO("yolo11n.pt")
+        except Exception:
+            _yolo_model = False
+    return _yolo_model if _yolo_model is not False else None
+
+
+def _validate_goal_with_yolo(frame):
+    """Returns True if YOLO confirms goal-area activity (ball + players near penalty zone)."""
+    model = _get_yolo()
+    if model is None:
+        return True  # no YOLO — trust VLM
+    try:
+        results = model(frame, verbose=False)
+        h, w = frame.shape[:2]
+        # penalty area is roughly bottom-left or bottom-right third of frame
+        # check for sports ball (class 32) and persons (class 0) in bottom third
+        ball_near_goal = False
+        players_in_box = 0
+        for r in results:
+            for box in r.boxes:
+                cls = int(box.cls[0])
+                y1 = float(box.xyxy[0][1])
+                x1 = float(box.xyxy[0][0])
+                x2 = float(box.xyxy[0][2])
+                cx = (x1 + x2) / 2
+                in_bottom = y1 > h * 0.55  # bottom 45% of frame
+                near_left = cx < w * 0.40   # left third
+                near_right = cx > w * 0.60  # right third
+                in_goal_area = in_bottom and (near_left or near_right)
+                if cls == 32 and in_goal_area:  # sports ball
+                    ball_near_goal = True
+                if cls == 0 and in_goal_area:   # person
+                    players_in_box += 1
+        # goal confirmed if ball near goal OR 2+ players in penalty area
+        return ball_near_goal or players_in_box >= 2
+    except Exception:
+        return True  # YOLO error — trust VLM
+
 logger = logging.getLogger("orchestrator")
 
 MAX_RETRIES = 3
@@ -547,31 +594,40 @@ class VideoOrchestrator:
                             deduped.append(e)
                     events = deduped
                     key_events = router.process_event(events)
-                    # dedup: if GOAL detected within 4s of GOAL_ATTEMPT, merge
-                    if len(self.ctx.key_events) >= 2:
-                        prev = self.ctx.key_events[-1]
+                    # dedup: merge GOAL_ATTEMPT + GOAL within 4s
+                    ctx_evs = self.ctx.key_events
+                    if len(ctx_evs) >= 2:
+                        prev = ctx_evs[-1]
                         curr = key_events[0] if key_events else None
                         if curr and prev.get("type") == "GOAL_ATTEMPT" and curr.get("type") == "GOAL":
                             try:
                                 pt = float(prev.get("timestamp", "0").replace("s", ""))
                                 ct = float(curr.get("timestamp", "0").replace("s", ""))
                                 if ct - pt < 4.0:
-                                    self.ctx.key_events[-1] = curr
-                                    self.ctx.key_events[-1]["timestamp"] = prev["timestamp"]
+                                    ctx_evs[-1] = curr
+                                    ctx_evs[-1]["timestamp"] = prev["timestamp"]
                                     key_events = []
                             except (ValueError, TypeError):
                                 pass
-                    # dedup: skip duplicate GOAL within 6s of previous GOAL
-                    if key_events and self.ctx.key_events:
-                        prev = self.ctx.key_events[-1]
-                        for ev in list(key_events):
-                            if ev.get("type") == "GOAL" and prev.get("type") == "GOAL":
+                    # dedup: remove any event whose type+timestamp already exists in ctx history
+                    recent_window = 8.0  # seconds
+                    try:
+                        current_ts = float(timestamp)
+                    except (ValueError, TypeError):
+                        current_ts = 0.0
+                    for ev in list(key_events):
+                        et = ev.get("type", "")
+                        if et == "GOAL_ATTEMPT":
+                            continue  # attempts can repeat
+                        for past in reversed(ctx_evs):
+                            if past.get("type") == et:
                                 try:
-                                    pt = float(prev.get("timestamp", "0").replace("s", ""))
-                                    ct = float(ev.get("timestamp", "0").replace("s", ""))
-                                    if ct - pt < 6.0:
+                                    pt = float(past.get("timestamp", "0").replace("s", ""))
+                                    if abs(current_ts - pt) < recent_window:
                                         key_events.remove(ev)
-                                        logger.debug("  dedup: skipped duplicate GOAL at %.1fs (prev=%.1fs)", ct, pt)
+                                        logger.debug("  dedup: skipped %s at %.1fs (existing at %.1fs)",
+                                                     et, current_ts, pt)
+                                        break
                                 except (ValueError, TypeError):
                                     pass
                     # update momentum from event data
@@ -592,10 +648,20 @@ class VideoOrchestrator:
                             if has_goal_context:
                                 validated_goals.append(ev)
                             else:
-                                # downgrade to attempt — scene doesn't confirm goal
                                 ev = dict(ev, type="GOAL_ATTEMPT")
                                 logger.debug("  downgraded GOAL → GOAL_ATTEMPT (no scene confirmation)")
                         validated_goals.append(ev)
+                    # YOLO cross-check: verify goal-area activity in the actual frame
+                    for ev in validated_goals:
+                        if ev.get("type") == "GOAL":
+                            if not _validate_goal_with_yolo(frame):
+                                ev["type"] = "GOAL_ATTEMPT"
+                                logger.debug("  downgraded GOAL → GOAL_ATTEMPT (YOLO: no goal-area activity)")
+                                # also downgrade in ctx.key_events for consistency
+                                for ctx_ev in self.ctx.key_events:
+                                    if ctx_ev.get("timestamp") == ev.get("timestamp") and ctx_ev.get("type") == "GOAL":
+                                        ctx_ev["type"] = "GOAL_ATTEMPT"
+                                        break
                     sig_events = validated_goals
                     # score fallback: only if scoreboard has NEVER read a score (not just not recently)
                     sb_has_read = any(h > 0 or a > 0 for h, a, _ in sb_history)
