@@ -10,6 +10,9 @@ class EventEmitter:
     def on_detection(self, sport, video_type, location, league, teams):
         pass
 
+    def on_detection_complete(self, sport, video_type, location, league, teams, total_frames):
+        """Fired after classify+geo+sport — signals that frame processing is about to begin."""
+
     def on_agent_active(self, agent_name):
         pass
 

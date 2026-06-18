@@ -74,6 +74,13 @@ class WebSocketEmitter(EventEmitter):
                      "video_type": video_type, "location": location,
                      "league": league, "teams": teams})
 
+    def on_detection_complete(self, sport, video_type, location, league, teams, total_frames):
+        self._send({"type": "detection_complete", "sport": sport,
+                     "video_type": video_type, "location": location,
+                     "league": league, "teams": teams,
+                     "total_frames": total_frames,
+                     "status": "processing"})
+
     def on_agent_active(self, agent_name):
         self._send({"type": "agent_active", "agent": agent_name})
 

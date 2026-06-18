@@ -477,7 +477,14 @@ class VideoOrchestrator:
         processed = 0
         video_stem = Path(self.video_path).stem
 
-        # emit initial progress so UI doesn't look frozen during first VLM calls
+        # emit detection complete + initial progress BEFORE frame loop starts
+        self.emitter.on_detection_complete(
+            sport=sport_id, video_type=vt,
+            location=geo.get("stadium", geo.get("city", "")),
+            league=geo.get("league", ""),
+            teams=geo.get("teams", []),
+            total_frames=total_frames,
+        )
         self.emitter.on_progress(0, total_frames, 0)
 
         # live mode: progress is wall-clock, not frame count
