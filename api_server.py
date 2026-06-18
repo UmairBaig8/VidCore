@@ -85,6 +85,10 @@ class WebSocketEmitter(EventEmitter):
         self._send({"type": "scene", "timestamp": timestamp,
                      "scene_type": scene_type, "activity": activity})
 
+    def on_yolo_frame(self, ball_zone, player_count, phase_hint):
+        self._send({"type": "yolo", "ball_zone": ball_zone,
+                     "player_count": player_count, "phase_hint": phase_hint})
+
     def on_key_event(self, event):
         et = event.get("type", "")
         self._send({"type": "key_event",

@@ -27,7 +27,7 @@ from skills.csv_writer import save_csv
 from skills.highlight_reel import generate_all_reels
 from skills.live_reel import LiveReelBuilder
 
-# lazy YOLO model — loaded once, used to filter false GOAL detections
+# lazy YOLO model — loaded once, runs on every frame for VLM cross-validation
 _yolo_model = None
 
 
@@ -42,35 +42,63 @@ def _get_yolo():
     return _yolo_model if _yolo_model is not False else None
 
 
-def _yolo_has_goal_activity(frame):
-    """YOLO check: ball must be in bottom third + players near goal area.
-    Returns True if frame shows plausible goal-area activity, False if ball is clearly elsewhere."""
+def _analyze_frame_yolo(frame):
+    """Run YOLO on frame, return structured data for VLM cross-check.
+    Returns dict with: ball_xy, ball_zone, player_count, players_in_box, phase_hint."""
     model = _get_yolo()
     if model is None:
-        return True
+        return None
     try:
         results = model(frame, verbose=False)
         h, w = frame.shape[:2]
-        ball_y = -1
-        ball_cx = -1
-        players_near_goal = 0
+        ball_cx, ball_cy = -1, -1
+        total_players = 0
+        players_bottom = 0
         for r in results:
             for box in r.boxes:
                 cls = int(box.cls[0])
                 y1 = float(box.xyxy[0][1])
                 x1 = float(box.xyxy[0][0])
                 x2 = float(box.xyxy[0][2])
-                cx = (x1 + x2) / 2
-                if cls == 32:  # sports ball
-                    ball_y = y1
-                    ball_cx = cx
-                if cls == 0 and y1 > h * 0.50:  # person in bottom half
-                    players_near_goal += 1
-        # ball must be in bottom 40% — if ball is in midfield/top, not a goal
-        ball_in_attacking_zone = ball_y > h * 0.60
-        return ball_in_attacking_zone and players_near_goal >= 1
+                if cls == 0:  # person
+                    total_players += 1
+                    if y1 > h * 0.55:
+                        players_bottom += 1
+                elif cls == 32:  # sports ball
+                    ball_cx = (x1 + x2) / 2
+                    ball_cy = y1
+        # ball zone
+        if ball_cy < 0:
+            zone = "not_visible"
+        elif ball_cy < h * 0.25:
+            zone = "far_end"
+        elif ball_cy < h * 0.55:
+            zone = "midfield"
+        elif ball_cx > 0 and ball_cx < w * 0.35:
+            zone = "left_box"
+        elif ball_cx > 0 and ball_cx > w * 0.65:
+            zone = "right_box"
+        else:
+            zone = "center_attacking"
+        # phase hint from yolo
+        if zone in ("left_box", "right_box"):
+            phase_hint = "attack_final_third"
+        elif zone == "midfield" and total_players >= 6:
+            phase_hint = "open_play"
+        elif total_players <= 3:
+            phase_hint = "commercial_or_replay"
+        else:
+            phase_hint = "unknown"
+        return {
+            "ball_xy": f"({ball_cx:.0f},{ball_cy:.0f})" if ball_cy >= 0 else "not_found",
+            "ball_zone": zone,
+            "player_count": total_players,
+            "players_in_box": players_bottom,
+            "phase_hint": phase_hint,
+            "has_goal_activity": zone in ("left_box", "right_box") and players_bottom >= 1,
+        }
     except Exception:
-        return True
+        return None
 
 logger = logging.getLogger("orchestrator")
 
@@ -477,9 +505,21 @@ class VideoOrchestrator:
             if image_b64 is None:
                 continue
 
-            # step 1: scene detection (always)
+            # step 0: YOLO analysis (fast, runs on every frame)
+            t_yolo = time.time()
+            yolo = _analyze_frame_yolo(frame)
+            t_yolo = time.time() - t_yolo
+            if yolo:
+                self.emitter.on_yolo_frame(yolo["ball_zone"], yolo["player_count"], yolo["phase_hint"])
+
+            # step 1: scene detection (always — inject YOLO data)
             t_scene = time.time()
-            scene_desc = _ask_with_retry(client, scene_prompt, image_b64, label="scene")
+            yolo_hint = ""
+            if yolo:
+                yolo_hint = (f"\n\n[YOLO pre-scan: ball={yolo['ball_zone']} "
+                             f"players={yolo['player_count']} "
+                             f"phase_hint={yolo['phase_hint']}]")
+            scene_desc = _ask_with_retry(client, scene_prompt + yolo_hint, image_b64, label="scene")
             t_scene = time.time() - t_scene
             self._emit_agent("scene")
             if scene_desc is None:
@@ -556,6 +596,11 @@ class VideoOrchestrator:
 
             # step 2: router decides what else to call
             route = router.route(scene_desc, processed)
+            # YOLO cross-check: if YOLO sees ball in box but router skipped event detection, force it
+            if yolo and yolo.get("has_goal_activity") and not route["event_detector"]:
+                route["event_detector"] = True
+                route["reason"] = "yolo_override: ball in box"
+                logger.debug("  YOLO override: forcing event detection (ball in box)")
             self._vprint(f"frame={processed} phase={self.ctx.phase} "
                          f"event={route['event_detector']} "
                          f"reasoning={route['reasoning']} "
@@ -649,10 +694,11 @@ class VideoOrchestrator:
                     validated_goals = []
                     for ev in sig_events:
                         if ev.get("type") == "GOAL":
-                            if has_goal_context and _yolo_has_goal_activity(frame):
+                            yolo_ok = yolo and yolo.get("has_goal_activity", True)
+                            if has_goal_context and yolo_ok:
                                 validated_goals.append(ev)
                             else:
-                                reason = "no scene confirmation" if not has_goal_context else "YOLO: ball not in attacking zone"
+                                reason = "no scene confirmation" if not has_goal_context else "YOLO: ball not in box"
                                 ev = dict(ev, type="GOAL_ATTEMPT")
                                 logger.debug("  downgraded GOAL → GOAL_ATTEMPT (%s)", reason)
                         validated_goals.append(ev)
@@ -765,15 +811,16 @@ class VideoOrchestrator:
                 events_str = ""
                 if key_events:
                     events_str = " | " + ",".join(e["type"] for e in key_events[:3])
+                yolo_tag = f" [{yolo['ball_zone']}]" if yolo else ""
                 print(f"\r  {bar} {pct:.0f}% ({processed}/{total_frames}) "
-                      f"{self.ctx.phase} {self.ctx.score_string()}{events_str}",
+                      f"{self.ctx.phase} {self.ctx.score_string()}{yolo_tag}{events_str}",
                       end="", flush=True)
 
             pct = int(min(timestamp / video_duration * 100, 100)) if video_duration else int(processed / max(total_frames, 1) * 100)
             self.emitter.on_progress(processed, total_frames, pct)
 
             elapsed = time.time() - t_start
-            parts = [f"total={elapsed:.1f}s", f"scene={t_scene:.1f}s"]
+            parts = [f"total={elapsed:.1f}s", f"yolo={t_yolo:.1f}s", f"scene={t_scene:.1f}s"]
             if t_event:
                 parts.append(f"event={t_event:.1f}s")
             if t_analysis:

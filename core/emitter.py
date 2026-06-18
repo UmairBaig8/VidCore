@@ -19,6 +19,9 @@ class EventEmitter:
     def on_scene(self, timestamp, scene_type, activity, scene_raw):
         pass
 
+    def on_yolo_frame(self, ball_zone, player_count, phase_hint):
+        """YOLO pre-scan data for each frame."""
+
     def on_key_event(self, event):
         pass
 
