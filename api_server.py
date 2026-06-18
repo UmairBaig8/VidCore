@@ -489,4 +489,14 @@ async def websocket_endpoint(ws: WebSocket, job_id: str):
 
 if __name__ == "__main__":
     import uvicorn
+    # Pre-load YOLO at startup so first analysis doesn't pay 36s cost
+    import threading
+    def _preload_yolo():
+        try:
+            from core.orchestrator import _get_yolo
+            _get_yolo()
+            logger.info("YOLO model pre-loaded")
+        except Exception as e:
+            logger.warning("YOLO preload failed: %s", e)
+    threading.Thread(target=_preload_yolo, daemon=True).start()
     uvicorn.run(app, host="0.0.0.0", port=9000)

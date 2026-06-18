@@ -425,8 +425,6 @@ class VideoOrchestrator:
 
         t_detect = time.time()
         logger.info("detection phase starting (classify+geo+sport in parallel)")
-        # pre-load YOLO in background so first frame doesn't pay 36s cost
-        ThreadPoolExecutor(max_workers=1).submit(_get_yolo)
         with TPE(max_workers=3) as pool:
             f_cls = pool.submit(_run_classify)
             f_geo = pool.submit(_run_geo)
