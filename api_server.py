@@ -49,8 +49,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# concurrency limit — prevent vLLM overload
-MAX_CONCURRENT_JOBS = 2
+# concurrency limit — with 192GB VRAM, vLLM handles many concurrent requests
+MAX_CONCURRENT_JOBS = 4
 job_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_JOBS)
 
 static_dir = output_dir()
