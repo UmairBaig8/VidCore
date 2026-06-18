@@ -520,6 +520,7 @@ class VideoOrchestrator:
             t_start = time.time()
             processed += 1
             sig_events = []
+            key_events = []
             reasoning_str = None
             commentary_str = None
             image_b64 = encode_frame(frame)
@@ -624,9 +625,12 @@ class VideoOrchestrator:
                         label="event")
                     t_event = time.time() - t0
                     self._emit_agent("event")
-                    if event_str and sport_events_prompt:
+                    logger.info("event vllm returned %d chars", len(event_str) if event_str else 0)
+                    if event_str:
                         parsed = _parse_json_safe(event_str)
                         events = parsed.get("events", [])
+                        if not events:
+                            logger.debug("event detector returned empty events list")
                         for e in events:
                             e["timestamp"] = f"{timestamp:.1f}s"
                         seen_types = set()
@@ -636,7 +640,10 @@ class VideoOrchestrator:
                             if et not in seen_types:
                                 seen_types.add(et)
                                 deduped.append(e)
-                        key_events = router.process_event(deduped)
+                        if deduped:
+                            key_events = router.process_event(deduped)
+                        else:
+                            key_events = []
                         # dedup within ctx history
                         ctx_evs = self.ctx.key_events
                         if len(ctx_evs) >= 2:
@@ -691,20 +698,17 @@ class VideoOrchestrator:
                             if ev.get("type") == "GOAL":
                                 yolo_ok = yolo and yolo.get("has_goal_activity", True)
                                 if has_goal_context and yolo_ok:
-                                    gk = f"{ev.get('team','?')}_{ev.get('player','?')}"
-                                    if gk in pending_goals:
-                                        pending_goals[gk]["count"] += 1
-                                        if pending_goals[gk]["count"] >= 2:
+                                        gk = f"{ev.get('team','?')}_{ev.get('player','?')}"
+                                        if gk in pending_goals:
+                                            pending_goals[gk]["count"] += 1
                                             validated.append(ev)
-                                            del pending_goals[gk]
-                                            logger.info("  GOAL confirmed: %s (2 frames)", gk)
+                                            logger.info("  GOAL confirmed: %s (frame %d)", gk, pending_goals[gk]["count"])
+                                            if pending_goals[gk]["count"] >= 1:
+                                                del pending_goals[gk]
                                         else:
-                                            ev = dict(ev, type="GOAL_ATTEMPT")
-                                            validated.append(ev)
-                                    else:
-                                        pending_goals[gk] = {"event": ev, "first_ts": timestamp, "count": 1}
-                                        ev = dict(ev, type="GOAL_ATTEMPT")
-                                        validated.append(ev)
+                                            pending_goals[gk] = {"event": ev, "first_ts": timestamp, "count": 1}
+                                            validated.append(ev)  # accept first frame as valid
+                                            logger.info("  GOAL: %s (first detection)", gk)
                                 else:
                                     ev = dict(ev, type="GOAL_ATTEMPT")
                                     validated.append(ev)
@@ -717,6 +721,8 @@ class VideoOrchestrator:
                                     del pending_goals[gk]
                             except (TypeError, KeyError):
                                 pass
+                        if key_events:
+                            logger.info("frame events: %s", [(e.get("type"), e.get("team", "?")) for e in key_events])
 
             if self.verbose and route:
                 self._vprint(f"frame={processed} phase={self.ctx.phase} "
