@@ -537,6 +537,15 @@ class VideoOrchestrator:
                     events = parsed.get("events", [])
                     for e in events:
                         e["timestamp"] = f"{timestamp:.1f}s"
+                    # dedup events from same frame: keep only one per event type
+                    seen_types = set()
+                    deduped = []
+                    for e in events:
+                        et = e.get("type", "")
+                        if et not in seen_types:
+                            seen_types.add(et)
+                            deduped.append(e)
+                    events = deduped
                     key_events = router.process_event(events)
                     # dedup: if GOAL detected within 4s of GOAL_ATTEMPT, merge
                     if len(self.ctx.key_events) >= 2:
