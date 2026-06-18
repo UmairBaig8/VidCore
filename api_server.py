@@ -6,6 +6,7 @@ import asyncio
 import csv
 import io
 import json
+import logging
 import shutil
 import threading
 import time
@@ -20,6 +21,8 @@ from fastapi.staticfiles import StaticFiles
 from core.emitter import EventEmitter
 from core.orchestrator import VideoOrchestrator
 from core.paths import output_dir, videos_dir, project_root
+
+logger = logging.getLogger("api")
 
 app = FastAPI(title="VidCore API", version="1.0")
 
@@ -61,6 +64,9 @@ class WebSocketEmitter(EventEmitter):
         self.loop = loop
 
     def _send(self, data):
+        t = data.get("type", "?")
+        if t not in ("yolo",):  # don't log per-frame yolo spam
+            logger.info("ws → %s %s", t, {k: v for k, v in data.items() if k != "type"})
         try:
             future = asyncio.run_coroutine_threadsafe(
                 self.ws.send_json(data), self.loop
@@ -147,6 +153,8 @@ class WebSocketEmitter(EventEmitter):
 def _run_analysis(job_id, video_path, **kwargs):
     job_semaphore.acquire()
     try:
+        logger.info("job %s: starting analysis (video=%s)", job_id, Path(video_path).name)
+        t0 = time.time()
         emitter = jobs[job_id].get("emitter")
         kwargs.setdefault("stream_mode", True)
         kwargs.setdefault("live", True)
@@ -158,6 +166,11 @@ def _run_analysis(job_id, video_path, **kwargs):
         )
         jobs[job_id]["orchestrator"] = orchestrator
         result = orchestrator.run()
+        elapsed = time.time() - t0
+        logger.info("job %s: complete in %.1fs, score=%s, events=%d",
+                     job_id, elapsed,
+                     orchestrator.ctx.score_string() if orchestrator.ctx else "?",
+                     len(orchestrator.ctx.key_events) if orchestrator.ctx else 0)
         jobs[job_id]["status"] = "complete"
         jobs[job_id]["result"] = str(result) if result else None
         if orchestrator.ctx:

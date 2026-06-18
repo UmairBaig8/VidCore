@@ -424,6 +424,7 @@ class VideoOrchestrator:
             return _detect_sport(client, self.video_path)
 
         t_detect = time.time()
+        logger.info("detection phase starting (classify+geo+sport in parallel)")
         with TPE(max_workers=3) as pool:
             f_cls = pool.submit(_run_classify)
             f_geo = pool.submit(_run_geo)
@@ -833,12 +834,15 @@ class VideoOrchestrator:
             self.emitter.on_progress(processed, total_frames, pct)
 
             elapsed = time.time() - t_start
-            parts = [f"total={elapsed:.1f}s", f"yolo={t_yolo:.1f}s", f"scene={t_scene:.1f}s"]
+            parts = [f"vllm={elapsed:.1f}s", f"yolo={t_yolo:.1f}s", f"scene+t={t_scene:.1f}s"]
             if t_event:
                 parts.append(f"event={t_event:.1f}s")
             if t_analysis:
-                parts.append(f"analysis={t_analysis:.1f}s")
-            logger.debug("frame %d [%s] complete", processed, ", ".join(parts))
+                parts.append(f"reason+comm={t_analysis:.1f}s")
+            if key_events:
+                types = ",".join(e["type"] for e in key_events[:5])
+                parts.append(f"events=[{types}]")
+            logger.info("frame %3d/%d | %s", processed, total_frames, " ".join(parts))
 
         if not self.stream_mode and not self.report_only:
             print()

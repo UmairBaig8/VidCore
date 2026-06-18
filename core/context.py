@@ -3,8 +3,11 @@ Global match context — tracks state across frames.
 Updated by agent router, read by orchestrator for report generation.
 """
 
+import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+
+logger = logging.getLogger("context")
 
 
 @dataclass
@@ -49,9 +52,14 @@ class MatchContext:
         self.key_events.append(event)
         self.last_event = event.get("type", "unknown")
         self.last_event_time = event.get("timestamp", "?")
+        logger.info("event #%d: %s team=%s ts=%s",
+                     len(self.key_events), self.last_event,
+                     event.get("team", "?"), self.last_event_time)
 
         et = event.get("type", "")
         if et in ("GOAL",):
+            logger.info("  → context: GOAL event (score=%s, %d total events)",
+                        self.score_string(), len(self.key_events))
             self.last_score_change = event.get("timestamp")
             self.force_full_pipeline = True
             self.consecutive_generic_frames = 0
@@ -66,6 +74,7 @@ class MatchContext:
 
     def update_phase(self, new_phase: str):
         if new_phase != self.phase:
+            logger.info("phase: %s → %s", self.phase, new_phase)
             self.phase_changed = True
             self.phase = new_phase
             self.phase_frame_count = 0

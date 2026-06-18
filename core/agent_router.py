@@ -11,6 +11,10 @@ Design:
 This eliminates ~70% of LLM calls on generic play frames.
 """
 
+import logging
+
+logger = logging.getLogger("router")
+
 SKIP_EVENT_AFTER_GENERIC = 3      # skip event detection after N generic frames
 PHASE_CHECK_INTERVAL = 5           # re-check phase every N frames
 KEY_EVENT_TYPES = {
@@ -91,6 +95,8 @@ class AgentRouter:
             if et in key_set:
                 keys.append(ev)
                 self.ctx.add_key_event(ev)
+                logger.info("key_event: %s team=%s ts=%s", et,
+                            ev.get("team", "?"), ev.get("timestamp", "?"))
             else:
                 generics += 1
 
