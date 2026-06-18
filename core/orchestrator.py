@@ -681,8 +681,9 @@ class VideoOrchestrator:
                             et = ev.get("type", "")
                             if et == "GOAL_ATTEMPT":
                                 continue
+                            ev_ts = ev.get("timestamp", "")
                             for past in reversed(ctx_evs):
-                                if past.get("type") == et:
+                                if past.get("type") == et and past.get("timestamp") != ev_ts:
                                     try:
                                         pt = float(past.get("timestamp", "0").replace("s", ""))
                                         if abs(current_ts - pt) < recent_window:
