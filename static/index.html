@@ -991,11 +991,14 @@
     .timeline-progress-fill {
       height: 100%;
       width: 0%;
-      background: var(--accent-blue-glow);
+      background: linear-gradient(90deg, var(--accent-blue), #60a5fa);
       border-radius: 999px;
       position: absolute;
       top: 0;
       left: 0;
+      z-index: 1;
+      transition: width 0.3s ease;
+      box-shadow: 0 0 10px var(--accent-blue-glow);
     }
 
     .timeline-marker {
